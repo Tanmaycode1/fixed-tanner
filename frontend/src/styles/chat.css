@@ -1,0 +1,32 @@
+@layer components {
+    .message-bubble {
+        @apply relative px-4 py-2 rounded-lg max-w-[70%];
+    }
+
+    .message-bubble::before {
+        content: '';
+        @apply absolute w-0 h-0 border-8 border-transparent;
+    }
+
+    .message-bubble.sent {
+        @apply bg-primary text-primary-foreground ml-auto;
+    }
+
+    .message-bubble.sent::before {
+        @apply border-primary border-l-transparent border-b-transparent;
+        right: -8px;
+        top: 50%;
+        transform: translateY(-50%);
+    }
+
+    .message-bubble.received {
+        @apply bg-accent mr-auto;
+    }
+
+    .message-bubble.received::before {
+        @apply border-accent border-r-transparent border-b-transparent;
+        left: -8px;
+        top: 50%;
+        transform: translateY(-50%);
+    }
+} 

@@ -1,7 +1,7 @@
 import { motion } from 'framer-motion';
 import { Card } from '@/components/ui/card';
-import { Link as LinkIcon, Mail, Calendar, Shield, Bell, Settings } from 'lucide-react';
-import Link from 'next/link';
+import { Mail, Shield, Settings } from 'lucide-react';
+
 import type { UserProfile } from '@/types/user';
 
 const fadeIn = {
@@ -15,14 +15,7 @@ interface AccountDetailsProps {
 }
 
 export function AccountDetails({ profile }: AccountDetailsProps) {
-  const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString('en-US', {
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric'
-    });
-  };
-
+  
   const accountDetails = [
     {
       icon: Shield,

@@ -1,6 +1,7 @@
 import { User, Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { suggestedUsers } from '@/data/mockData';
+import { default as NextImage } from 'next/image';
 
 export function ProfileRecommendations() {
   return (
@@ -16,11 +17,15 @@ export function ProfileRecommendations() {
           >
             <div className="relative flex-shrink-0">
               {user.avatar ? (
-                <img
-                  src={user.avatar}
-                  alt={user.username}
-                  className="w-10 h-10 rounded-full object-cover"
-                />
+                <div className="relative w-10 h-10">
+                  <NextImage
+                    src={user.avatar}
+                    alt={user.username}
+                    fill
+                    className="rounded-full object-cover"
+                    sizes="40px"
+                  />
+                </div>
               ) : (
                 <div className="w-10 h-10 rounded-full bg-gradient-to-br from-gray-100 to-gray-200 dark:from-gray-700 dark:to-gray-800 flex items-center justify-center">
                   <User className="w-5 h-5 text-gray-500 dark:text-gray-400" />

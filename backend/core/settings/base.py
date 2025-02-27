@@ -137,8 +137,13 @@ SIMPLE_JWT = {
 # Channels configuration
 CHANNEL_LAYERS = {
     "default": {
-        "BACKEND": "channels.layers.InMemoryChannelLayer"
-    }
+        "BACKEND": "channels_redis.core.RedisChannelLayer",
+        "CONFIG": {
+            "hosts": [("redis", 6379)],
+            "capacity": 1500,  # Increase channel capacity
+            "expiry": 10,  # Message expiry in seconds
+        },
+    },
 }
 
 # Celery Configuration
@@ -214,9 +219,17 @@ DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL')
 # Add these settings for search
 POSTGRES_SEARCH_CONFIG = 'english'  # or your preferred language 
 
-# For WebSocket connections
-CHANNEL_LAYERS = {
-    "default": {
-        "BACKEND": "channels.layers.InMemoryChannelLayer"
-    }
-} 
+# CORS settings
+CORS_ALLOW_ALL_ORIGINS = True  # For development only
+CORS_ALLOW_CREDENTIALS = True
+CORS_ALLOWED_ORIGINS = [
+    "http://localhost:3000",
+    # Add other origins as needed
+]
+
+# Add websocket to allowed hosts
+ALLOWED_HOSTS = ['*']  # For development only 
+
+# WebSocket specific settings
+WEBSOCKET_TIMEOUT = 30  # 30 seconds timeout
+WEBSOCKET_ACCEPT_WAIT = 20  # 20 seconds wait for accept 

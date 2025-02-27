@@ -18,6 +18,7 @@ from rest_framework.authentication import BasicAuthentication
 from django.core.paginator import Paginator
 from django.db.models import Exists, OuterRef, Q
 from core.utils.test_connections import test_s3_connection
+from core.utils.file_handlers import handle_uploaded_file
 
 logger = logging.getLogger(__name__)
 
@@ -432,47 +433,13 @@ def update_avatar(request):
                 ErrorCode.INVALID_IMAGE
             )
 
-        # Validate file size (5MB max)
-        if avatar.size > 5 * 1024 * 1024:
-            return error_response(
-                "File size too large. Maximum size is 5MB", 
-                ErrorCode.FILE_TOO_LARGE
-            )
-
-        # Process and optimize the image
         try:
-            img = Image.open(avatar)
-            
-            # Convert to RGB if necessary
-            if img.mode != 'RGB':
-                img = img.convert('RGB')
-            
-            # Resize if too large (max 1000x1000)
-            if img.height > 1000 or img.width > 1000:
-                output_size = (1000, 1000)
-                img.thumbnail(output_size)
-            
-            # Save to BytesIO
-            img_io = BytesIO()
-            img.save(img_io, format='JPEG', quality=85)
-            img_io.seek(0)
-
-            # Generate unique filename with timestamp
-            from django.utils import timezone
-            import os
-            
-            # Create user-specific directory path
-            user_directory = f'avatars/{request.user.id}'
-            timestamp = timezone.now().strftime('%Y%m%d%H%M%S')
-            file_extension = os.path.splitext(avatar.name)[1].lower()
-            if not file_extension:
-                file_extension = '.jpg'
-            
-            file_name = f'{user_directory}/{timestamp}{file_extension}'
-
-            # Ensure the directory exists
-            full_path = os.path.join(default_storage.location, user_directory)
-            os.makedirs(full_path, exist_ok=True)
+            # Handle avatar upload
+            avatar_path = handle_uploaded_file(
+                avatar,
+                directory=f'avatars/{request.user.id}',
+                is_image=True
+            )
             
             # Delete old avatar if exists
             if request.user.avatar:
@@ -481,18 +448,12 @@ def update_avatar(request):
                 except Exception as e:
                     logger.warning(f"Error deleting old avatar: {e}")
             
-            # Save new avatar
-            saved_path = default_storage.save(
-                file_name, 
-                ContentFile(img_io.getvalue())
-            )
-            
             # Update user's avatar field
-            request.user.avatar = saved_path
+            request.user.avatar = avatar_path
             request.user.save()
             
             # Get the full URL
-            avatar_url = default_storage.url(saved_path)
+            avatar_url = default_storage.url(avatar_path)
             
             return Response({
                 'success': True,

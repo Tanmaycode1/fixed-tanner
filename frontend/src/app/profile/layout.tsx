@@ -1,18 +1,15 @@
 "use client";
 
 import { useState, useEffect } from 'react';
-import { useTheme } from '@/context/ThemeContext';
 import { userApi } from '@/services/api';
 import { Sidebar } from '@/components/layout/Sidebar';
 import { MobileNav } from '@/components/layout/MobileNav';
-import { Sun, Moon } from 'lucide-react';
 
 export default function ProfileLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  const { theme, toggleTheme } = useTheme();
   const [currentUser, setCurrentUser] = useState(null);
 
   useEffect(() => {
@@ -43,16 +40,16 @@ export default function ProfileLayout({
               <span className="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-primary-600 to-primary-400">
                 Neuhu
               </span>
-              <button
+              {/* <button
                 onClick={toggleTheme}
                 className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
               >
-                {/* {theme === 'dark' ? (
+                {theme === 'dark' ? (
                   <Sun className="h-5 w-5 text-gray-600 dark:text-gray-400" />
                 ) : (
                   <Moon className="h-5 w-5 text-gray-600 dark:text-gray-400" />
-                )} */}
-              </button>
+                )}
+              </button> */}
             </div>
           </div>
         </div>

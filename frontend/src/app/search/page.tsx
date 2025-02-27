@@ -1,11 +1,11 @@
 "use client";
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Input } from '@/components/ui/Input';
 import { Loader2, Search, User as UserIcon, TrendingUp } from 'lucide-react';
-import { searchApi, getFullImageUrl } from '@/services/api';
+import { getFullImageUrl } from '@/services/api';
 import Link from 'next/link';
 import { Button } from "@/components/ui/button";
 import { PostCard } from '@/components/posts/PostCard';
@@ -28,12 +28,11 @@ export default function SearchPage() {
   const [activeTab, setActiveTab] = useState('all');
   const [results, setResults] = useState<SearchResults>({ posts: [], users: [] });
   const [loading, setLoading] = useState(false);
-  const [trending, setTrending] = useState<any[]>([]);
   const [loadingTrending, setLoadingTrending] = useState(true);
   const [trendingSearches, setTrendingSearches] = useState<any[]>([]);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
 
-  const performSearch = async (searchQuery: string, bypassCache = false) => {
+  const performSearch = async (searchQuery: string) => {
     if (!searchQuery.trim()) {
       setResults({ posts: [], users: [] });
       return;
@@ -58,14 +57,19 @@ export default function SearchPage() {
     }
   };
 
-  const debouncedSearch = debounce(performSearch, 300);
+  const debouncedSearch = useCallback(
+    debounce(performSearch, 300),
+    []
+  );
 
   useEffect(() => {
     if (query) {
       debouncedSearch(query);
     }
-    return () => debouncedSearch.cancel();
-  }, [query, activeTab]);
+    return () => {
+      debouncedSearch.cancel();
+    };
+  }, [query, activeTab, debouncedSearch]);
 
   useEffect(() => {
     const loadTrending = async () => {
@@ -91,25 +95,6 @@ export default function SearchPage() {
     };
     loadUser();
   }, []);
-
-  const handleFollowChange = async (userId: string, isFollowed: boolean) => {
-    try {
-      if (isFollowed) {
-        await userApi.unfollowUser(userId);
-      } else {
-        await userApi.followUser(userId);
-      }
-      
-      if (query) {
-        await performSearch(query, true);
-      }
-      
-      toast.success(isFollowed ? 'Unfollowed successfully' : 'Following successfully');
-    } catch (error) {
-      console.error('Follow/unfollow error:', error);
-      toast.error('Failed to update follow status');
-    }
-  };
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
@@ -226,7 +211,7 @@ export default function SearchPage() {
                       {results.posts.length === 0 && results.users.length === 0 && (
                         <div className="text-center py-12">
                           <p className="text-gray-500 dark:text-gray-400">
-                            No results found for "{query}"
+                            No results found for &quot;{query}&quot;
                           </p>
                         </div>
                       )}

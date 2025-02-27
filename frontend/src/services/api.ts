@@ -1,6 +1,6 @@
-import axios from 'axios';
-import { toast } from 'react-hot-toast';
-import { UserProfileUpdate } from '@/types/user';
+import axios, { AxiosError } from 'axios';
+import { UserProfileUpdate, SearchUser } from '@/types/user';
+import { Message } from '@/types/chat';
 
 // Create base API client
 export const apiClient = axios.create({
@@ -14,8 +14,20 @@ apiClient.interceptors.request.use((config) => {
   return config;
 });
 
-// Error handler utility
-export const handleApiError = (error: any) => {
+// Add at the top of the file with other types
+type ApiErrorType = Error & { 
+  response?: { 
+    data: { 
+      message?: string; 
+      errors?: Record<string, string[]>; 
+    }; 
+    status: number; 
+  }; 
+  request?: unknown;
+};
+
+// Update handleApiError to use this type
+export const handleApiError = (error: ApiErrorType) => {
   console.error('API Error:', error);
   
   if (error.response?.data) {
@@ -129,7 +141,11 @@ export class ApiError extends Error {
     this.name = 'ApiError';
   }
 
-  static fromResponse(error: any): ApiError {
+  static fromResponse(error: AxiosError<{
+    detail?: string;
+    message?: string;
+    [key: string]: unknown;
+  }>): ApiError {
     if (error.response) {
       const { data, status } = error.response;
       if (data.detail) {
@@ -137,9 +153,9 @@ export class ApiError extends Error {
       }
       if (typeof data === 'object' && !Array.isArray(data)) {
         const firstErrorKey = Object.keys(data)[0];
-        const firstError = data[firstErrorKey];
+        const firstError = data[firstErrorKey] as string | string[];
         const message = Array.isArray(firstError) ? firstError[0] : firstError;
-        return new ApiError(message, 'VALIDATION_ERROR', status, data);
+        return new ApiError(message, 'VALIDATION_ERROR', status, data as Record<string, string[]>);
       }
       return new ApiError(data.message || 'An error occurred', 'API_ERROR', status);
     }
@@ -167,14 +183,12 @@ export const getFullImageUrl = (path: string | null): string => {
 };
 
 // Add ApiResponse interface
-export type ApiResponse<T = any> = {
+export type ApiResponse<T = unknown> = {
   success: boolean;
-  message?: string;
   data?: T;
+  message?: string;
   errors?: Record<string, string[]>;
-  error?: string;
   status?: number;
-  email_verified?: boolean;
 };
 
 // Define and export API services
@@ -196,9 +210,13 @@ export const authApi = {
         message: response.data.message || 'Login failed',
         errors: response.data.errors
       };
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const axiosError = error as AxiosError<{
+        message?: string;
+        errors?: Record<string, string[]>;
+      }>;
       localStorage.clear();
-      const status = error.response?.status;
+      const status = axiosError.response?.status;
       const errorMessage = status === 404 
         ? 'User not found' 
         : status === 401 
@@ -211,14 +229,7 @@ export const authApi = {
         ? 'The password you entered is incorrect. Please try again.'
         : 'Please try again later.';
 
-      return {
-        success: false,
-        message: errorMessage,
-        errors: {
-          non_field_errors: [errorDetail]
-        },
-        status
-      };
+      return handleApiError(axiosError as ApiErrorType);
     }
   },
 
@@ -252,8 +263,12 @@ export const authApi = {
         message: response.data.message || 'Registration failed',
         errors: response.data.errors
       };
-    } catch (error: any) {
-      return handleApiError(error);
+    } catch (error: unknown) {
+      const axiosError = error as AxiosError<{
+        message?: string;
+        errors?: Record<string, string[]>;
+      }>;
+      return handleApiError(axiosError as ApiErrorType);
     }
   },
 
@@ -261,8 +276,12 @@ export const authApi = {
     try {
       const response = await api.get(`/api/users/check-email/${email}/`);
       return response.data;
-    } catch (error: any) {
-      return handleApiError(error);
+    } catch (error: unknown) {
+      const axiosError = error as AxiosError<{
+        message?: string;
+        errors?: Record<string, string[]>;
+      }>;
+      return handleApiError(axiosError as ApiErrorType);
     }
   },
 
@@ -293,18 +312,16 @@ export const authApi = {
         success: true, 
         message: 'Logged out successfully' 
       };
-    } catch (error) {
+    } catch (error: unknown) {
       // If any error occurs, ensure local storage is cleared
       localStorage.removeItem('access_token');
       localStorage.removeItem('refresh_token');
       
-      return {
-        success: false,
-        message: 'Error during logout, but you have been logged out locally',
-        errors: {
-          non_field_errors: ['An error occurred during logout, but your session has been cleared locally']
-        }
-      };
+      const axiosError = error as AxiosError<{
+        message?: string;
+        errors?: Record<string, string[]>;
+      }>;
+      return handleApiError(axiosError as ApiErrorType);
     }
   },
 
@@ -312,8 +329,12 @@ export const authApi = {
     try {
       const response = await api.post('/api/auth/token/refresh/', { refresh });
       return response.data;
-    } catch (error: any) {
-      handleApiError(error);
+    } catch (error: unknown) {
+      const axiosError = error as AxiosError<{
+        message?: string;
+        errors?: Record<string, string[]>;
+      }>;
+      return handleApiError(axiosError as ApiErrorType);
     }
   },
 
@@ -321,8 +342,12 @@ export const authApi = {
     try {
       const response = await api.post('/api/auth/verify-email/', { token });
       return response.data;
-    } catch (error: any) {
-      handleApiError(error);
+    } catch (error: unknown) {
+      const axiosError = error as AxiosError<{
+        message?: string;
+        errors?: Record<string, string[]>;
+      }>;
+      return handleApiError(axiosError as ApiErrorType);
     }
   },
 
@@ -330,8 +355,12 @@ export const authApi = {
     try {
       const response = await api.post('/api/users/send-verification-otp/', { email });
       return response.data;
-    } catch (error: any) {
-      handleApiError(error);
+    } catch (error: unknown) {
+      const axiosError = error as AxiosError<{
+        message?: string;
+        errors?: Record<string, string[]>;
+      }>;
+      return handleApiError(axiosError as ApiErrorType);
     }
   },
 
@@ -339,11 +368,48 @@ export const authApi = {
     try {
       const response = await api.post('/api/users/verify-email-otp/', { email, otp });
       return response.data;
-    } catch (error: any) {
-      handleApiError(error);
+    } catch (error: unknown) {
+      const axiosError = error as AxiosError<{
+        message?: string;
+        errors?: Record<string, string[]>;
+      }>;
+      return handleApiError(axiosError as ApiErrorType);
     }
   }
 };
+
+interface ApiUser {
+  id: string;
+  username: string;
+  email: string;
+  first_name: string;
+  last_name: string;
+  avatar: string | null;
+  avatar_url?: string;
+  bio: string;
+  is_followed: boolean;
+}
+
+interface FollowUser {
+  id: string;
+  username: string;
+  email: string;
+  first_name: string;
+  last_name: string;
+  avatar: string | null;
+  bio: string;
+  is_followed: boolean;
+}
+
+interface FollowResponse {
+  success: boolean;
+  data: {
+    results: FollowUser[];
+  };
+  message?: string;
+  errors?: Record<string, string[]>;
+  status?: number;
+}
 
 export const userApi = {
   getProfile: async () => {
@@ -353,9 +419,12 @@ export const userApi = {
         response.data.data.avatar_url = getFullImageUrl(response.data.data.avatar_url);
       }
       return response.data;
-    } catch (error) {
-      handleApiError(error);
-      return { success: false };
+    } catch (error: unknown) {
+      const axiosError = error as AxiosError<{
+        message?: string;
+        errors?: Record<string, string[]>;
+      }>;
+      return handleApiError(axiosError as ApiErrorType);
     }
   },
 
@@ -363,8 +432,12 @@ export const userApi = {
     try {
       const response = await api.patch('/api/users/me/profile/', data);
       return response.data;
-    } catch (error: any) {
-      handleApiError(error);
+    } catch (error: unknown) {
+      const axiosError = error as AxiosError<{
+        message?: string;
+        errors?: Record<string, string[]>;
+      }>;
+      return handleApiError(axiosError as ApiErrorType);
     }
   },
 
@@ -384,8 +457,12 @@ export const userApi = {
       }
 
       return response.data;
-    } catch (error: any) {
-      handleApiError(error);
+    } catch (error: unknown) {
+      const axiosError = error as AxiosError<{
+        message?: string;
+        errors?: Record<string, string[]>;
+      }>;
+      return handleApiError(axiosError as ApiErrorType);
     }
   },
 
@@ -396,9 +473,12 @@ export const userApi = {
         response.data.data.avatar_url = getFullImageUrl(response.data.data.avatar);
       }
       return response.data;
-    } catch (error) {
-      handleApiError(error);
-      return { success: false };
+    } catch (error: unknown) {
+      const axiosError = error as AxiosError<{
+        message?: string;
+        errors?: Record<string, string[]>;
+      }>;
+      return handleApiError(axiosError as ApiErrorType);
     }
   },
 
@@ -406,8 +486,12 @@ export const userApi = {
     try {
       const response = await api.post(`/api/users/${userId}/follow/`);
       return response.data;
-    } catch (error) {
-      return handleApiError(error); // Return the error response instead of undefined
+    } catch (error: unknown) {
+      const axiosError = error as AxiosError<{
+        message?: string;
+        errors?: Record<string, string[]>;
+      }>;
+      return handleApiError(axiosError as ApiErrorType);
     }
   },
 
@@ -415,19 +499,23 @@ export const userApi = {
     try {
       const response = await api.post(`/api/users/${userId}/unfollow/`);
       return response.data;
-    } catch (error) {
-      return handleApiError(error); // Return the error response instead of undefined
+    } catch (error: unknown) {
+      const axiosError = error as AxiosError<{
+        message?: string;
+        errors?: Record<string, string[]>;
+      }>;
+      return handleApiError(axiosError as ApiErrorType);
     }
   },
 
-  getFollowers: async () => {
+  getFollowers: async (): Promise<FollowResponse> => {
     try {
       const response = await api.get('/api/users/followers/');
       if (response.data && response.data.success) {
         return {
           success: true,
           data: {
-            results: response.data.data.results.map((user: any) => ({
+            results: response.data.data.results.map((user: ApiUser) => ({
               ...user,
               avatar: user.avatar ? getFullImageUrl(user.avatar) : null
             }))
@@ -435,20 +523,23 @@ export const userApi = {
         };
       }
       throw new Error(response.data.message || 'Failed to fetch followers');
-    } catch (error) {
-      handleApiError(error);
-      throw error;
+    } catch (error: unknown) {
+      const axiosError = error as AxiosError<{
+        message?: string;
+        errors?: Record<string, string[]>;
+      }>;
+      return handleApiError(axiosError as ApiErrorType) as FollowResponse;
     }
   },
 
-  getFollowing: async () => {
+  getFollowing: async (): Promise<FollowResponse> => {
     try {
       const response = await api.get('/api/users/following/');
       if (response.data && response.data.success) {
         return {
           success: true,
           data: {
-            results: response.data.data.results.map((user: any) => ({
+            results: response.data.data.results.map((user: ApiUser) => ({
               ...user,
               avatar: user.avatar ? getFullImageUrl(user.avatar) : null
             }))
@@ -456,13 +547,16 @@ export const userApi = {
         };
       }
       throw new Error(response.data.message || 'Failed to fetch following');
-    } catch (error) {
-      handleApiError(error);
-      throw error;
+    } catch (error: unknown) {
+      const axiosError = error as AxiosError<{
+        message?: string;
+        errors?: Record<string, string[]>;
+      }>;
+      return handleApiError(axiosError as ApiErrorType) as FollowResponse;
     }
   },
 
-  searchUsers: async (query: string): Promise<ApiResponse<any[]>> => {
+  searchUsers: async (query: string): Promise<ApiResponse<SearchUser[]>> => {
     try {
       const response = await api.get('/api/search/', {
         params: { 
@@ -475,11 +569,15 @@ export const userApi = {
         success: true,
         data: response.data.data.users || []
       };
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Search Users Error:', error);
+      const axiosError = error as AxiosError<{
+        message?: string;
+        data?: SearchUser[];
+      }>;
       return {
         success: false,
-        error: error.response?.data?.message || 'Failed to search users',
+        errors: { message: [axiosError.response?.data?.message || 'Failed to search users'] },
         data: []
       };
     }
@@ -488,23 +586,26 @@ export const userApi = {
   getSuggestions: async () => {
     try {
       const response = await api.get('/api/users/suggestions/');
-      // Convert avatar URLs in the response
       if (response.data.success && Array.isArray(response.data.data)) {
-        response.data.data = response.data.data.map((user: any) => ({
+        response.data.data = response.data.data.map((user: ApiUser) => ({
           ...user,
-          avatar_url: getFullImageUrl(user.avatar_url)
+          avatar_url: user.avatar_url ? getFullImageUrl(user.avatar_url) : null
         }));
       }
-      return response.data;  // Return the whole response
-    } catch (error: any) {
+      return response.data;
+    } catch (error: unknown) {
       console.error('Suggestions error:', error);
-      return { success: false, data: [] };  // Return a properly structured error response
+      const axiosError = error as AxiosError<{
+        message?: string;
+        errors?: Record<string, string[]>;
+      }>;
+      return { success: false, data: [] };
     }
   },
 };
 
 export const searchApi = {
-  search: async (query: string, type: string = 'all', bypassCache: boolean = false) => {
+  search: async (query: string, type: string = 'all', bypassCache: boolean = false): Promise<ApiResponse<SearchData>> => {
     try {
       const response = await api.get('/api/search/', {
         params: { 
@@ -514,8 +615,12 @@ export const searchApi = {
         }
       });
       return { success: true, data: response.data.data };
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Search error:', error);
+      const axiosError = error as AxiosError<{
+        message?: string;
+        data?: SearchData;
+      }>;
       return { success: false, data: { posts: [], users: [] } };
     }
   },
@@ -524,9 +629,13 @@ export const searchApi = {
     try {
       const response = await api.get('/api/search/trending/');
       return response.data;
-    } catch (error) {
+    } catch (error: unknown) {
       // Only log the error, don't throw
       console.error('Trending search error:', error);
+      const axiosError = error as AxiosError<{
+        message?: string;
+        errors?: Record<string, string[]>;
+      }>;
       return {
         success: false,
         data: []
@@ -545,11 +654,15 @@ export const chatApi = {
         message: 'Chat rooms retrieved successfully'
       };
     } catch (error: unknown) {  // Add proper error typing
-      const err = error as { response?: { data?: { message?: string } } };
+      const axiosError = error as AxiosError<{
+        message?: string;
+        errors?: Record<string, string[]>;
+      }>;
+      const err = axiosError.response?.data || {};
       console.error('Error fetching chat rooms:', error);
       return {
         success: false,
-        message: err.response?.data?.message || 'Failed to fetch chat rooms',
+        message: err.message || 'Failed to fetch chat rooms',
         data: { results: [] }
       };
     }
@@ -578,11 +691,15 @@ export const chatApi = {
         success: false,
         message: response.data?.message || 'Failed to create chat room'
       };
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Error creating chat room:', error);
+      const axiosError = error as AxiosError<{
+        message?: string;
+        errors?: Record<string, string[]>;
+      }>;
       return {
         success: false,
-        message: error.response?.data?.message || 'Failed to create chat room'
+        message: axiosError.response?.data?.message || 'Failed to create chat room'
       };
     }
   },
@@ -597,11 +714,15 @@ export const chatApi = {
         data: response.data,
         message: 'Messages retrieved successfully'
       };
-    } catch (error) {
+    } catch (error: unknown) {
       if (error && typeof error === 'object' && 'response' in error) {
+        const axiosError = error as AxiosError<{
+          message?: string;
+          errors?: Record<string, string[]>;
+        }>;
         return {
           success: false,
-          message: (error.response as any)?.data?.message || 'Failed to fetch messages',
+          message: axiosError.response?.data?.message || 'Failed to fetch messages',
           data: { results: [], next: null, previous: null }
         };
       }
@@ -638,11 +759,15 @@ export const chatApi = {
         success: false,
         message: response.data?.message || 'Failed to send message'
       };
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Error sending message:', error);
+      const axiosError = error as AxiosError<{
+        message?: string;
+        errors?: Record<string, string[]>;
+      }>;
       return {
         success: false,
-        message: error.response?.data?.message || 'Failed to send message'
+        message: axiosError.response?.data?.message || 'Failed to send message'
       };
     }
   },
@@ -655,12 +780,15 @@ export const chatApi = {
         message: response.data?.message || 'Room marked as read',
         data: response.data?.data
       };
-    } catch (error: any) {
-      console.error('Error marking room as read:', error);
+    } catch (error: unknown) {
+      const axiosError = error as AxiosError<{
+        message?: string;
+        errors?: Record<string, string[]>;
+      }>;
       return {
         success: false,
-        message: error.response?.data?.message || 'Failed to mark room as read',
-        error: error.message
+        message: axiosError.response?.data?.message || 'Failed to mark room as read',
+        errors: { message: [axiosError.message || 'Unknown error'] }
       };
     }
   },
@@ -672,11 +800,15 @@ export const chatApi = {
         success: response.data?.success || false,
         message: response.data?.message || 'Message marked as read'
       };
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Error marking message as read:', error);
+      const axiosError = error as AxiosError<{
+        message?: string;
+        errors?: Record<string, string[]>;
+      }>;
       return {
         success: false,
-        message: error.response?.data?.message || 'Failed to mark message as read'
+        message: axiosError.response?.data?.message || 'Failed to mark message as read'
       };
     }
   },
@@ -685,11 +817,15 @@ export const chatApi = {
     try {
       const response = await api.delete(`/api/chat/rooms/${roomId}/messages/delete_all/`);
       return response.data;
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Error deleting messages:', error);
+      const axiosError = error as AxiosError<{
+        message?: string;
+        errors?: Record<string, string[]>;
+      }>;
       return {
         success: false,
-        message: error.response?.data?.message || 'Failed to delete messages',
+        message: axiosError.response?.data?.message || 'Failed to delete messages',
         errors: {
           non_field_errors: ['Failed to delete messages']
         }
@@ -706,33 +842,39 @@ export const chatApi = {
       sender_id?: string;
       has_attachment?: boolean;
     }
-  ): Promise<ApiResponse> => {
+  ): Promise<ApiResponse<Message[]>> => {
     try {
       const response = await api.get(`/api/chat/rooms/${roomId}/messages/filter/`, {
         params: filters
       });
       
       if (response.data?.success) {
-        // Transform avatar URLs for all messages
-        const transformedMessages = response.data.data.map((message: any) => ({
-          ...message,
-          sender: {
-            ...message.sender,
-            avatar_url: message.sender.avatar_url ? 
-              getFullImageUrl(message.sender.avatar_url) : null
-          }
-        }));
+        const transformedMessages = response.data.data.map((message: Message) => {
+          const transformed: Message = {
+            ...message,
+            sender: {
+              ...message.sender,
+              avatar_url: message.sender.avatar_url ? 
+                getFullImageUrl(message.sender.avatar_url) : null
+            }
+          };
+          return transformed;
+        });
         return {
           success: true,
           data: transformedMessages
         };
       }
       return response.data;
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error('Error filtering messages:', error);
+      const axiosError = error as AxiosError<{
+        message?: string;
+        errors?: Record<string, string[]>;
+      }>;
       return {
         success: false,
-        message: error.response?.data?.message || 'Failed to filter messages',
+        message: axiosError.response?.data?.message || 'Failed to filter messages',
         errors: {
           non_field_errors: ['Failed to filter messages']
         }
@@ -743,13 +885,7 @@ export const chatApi = {
 
 // Add this to your api configuration
 api.interceptors.request.use(request => {
-  // Log outgoing requests with safe error handling
-  const requestInfo = {
-    url: request?.url || 'unknown',
-    method: request?.method || 'unknown',
-    data: request?.data || {},
-    headers: request?.headers || {}
-  };
+  // Log outgoing requests with safe error handlin
   
   return request;
 }, error => {
@@ -775,8 +911,12 @@ export const notificationApi = {
         }
       });
       return response.data;
-    } catch (error) {
-      return handleApiError(error);
+    } catch (error: unknown) {
+      const axiosError = error as AxiosError<{
+        message?: string;
+        errors?: Record<string, string[]>;
+      }>;
+      return handleApiError(axiosError as ApiErrorType);
     }
   },
 
@@ -784,8 +924,12 @@ export const notificationApi = {
     try {
       const response = await api.post(`/api/users/notifications/${notificationId}/mark-read/`);
       return response.data;
-    } catch (error) {
-      return handleApiError(error);
+    } catch (error: unknown) {
+      const axiosError = error as AxiosError<{
+        message?: string;
+        errors?: Record<string, string[]>;
+      }>;
+      return handleApiError(axiosError as ApiErrorType);
     }
   },
 
@@ -793,8 +937,12 @@ export const notificationApi = {
     try {
       const response = await api.post('/api/users/notifications/mark-all-read/');
       return response.data;
-    } catch (error) {
-      return handleApiError(error);
+    } catch (error: unknown) {
+      const axiosError = error as AxiosError<{
+        message?: string;
+        errors?: Record<string, string[]>;
+      }>;
+      return handleApiError(axiosError as ApiErrorType);
     }
   },
 
@@ -802,8 +950,12 @@ export const notificationApi = {
     try {
       const response = await api.delete('/api/users/notifications/clear-all/');
       return response.data;
-    } catch (error) {
-      return handleApiError(error);
+    } catch (error: unknown) {
+      const axiosError = error as AxiosError<{
+        message?: string;
+        errors?: Record<string, string[]>;
+      }>;
+      return handleApiError(axiosError as ApiErrorType);
     }
   },
 
@@ -811,8 +963,12 @@ export const notificationApi = {
     try {
       const response = await api.get('/api/users/notifications/unread/');
       return response.data;
-    } catch (error) {
-      return handleApiError(error);
+    } catch (error: unknown) {
+      const axiosError = error as AxiosError<{
+        message?: string;
+        errors?: Record<string, string[]>;
+      }>;
+      return handleApiError(axiosError as ApiErrorType);
     }
   }
 };
@@ -820,3 +976,8 @@ export const notificationApi = {
 // Import and re-export postsApi
 import { postsApi } from './postsApi';
 export { postsApi };
+
+interface SearchData {
+  posts: unknown[]; // Replace with proper Post type if available
+  users: unknown[]; // Replace with proper User type if available
+}

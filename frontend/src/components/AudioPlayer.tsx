@@ -1,7 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect } from 'react';
-import { motion } from 'framer-motion';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import {
   Play,
   Pause,
@@ -10,14 +9,14 @@ import {
   Rewind,
   Forward,
   ListMusic,
-  MoreHorizontal,
-  Disc3
+  MoreHorizontal
 } from 'lucide-react';
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import { cn } from "@/lib/utils";
 import { toast } from "react-hot-toast";
-import Image from "next/image";
+import { default as NextImage } from 'next/image';
+
 
 interface AudioPlayerProps {
   audioUrl: string;
@@ -47,9 +46,27 @@ export function AudioPlayer({
   const [currentTime, setCurrentTime] = useState(0);
   const [isLoaded, setIsLoaded] = useState(false);
   
-  const audioRef = useRef<HTMLAudioElement>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
   const animationRef = useRef<number | null>(null);
-  const isFirstRender = useRef(true);
+
+  // Use useCallback for functions that use refs
+  const play = useCallback(async () => {
+    if (audioRef.current) {
+      try {
+        await audioRef.current.play();
+        setIsPlaying(true);
+      } catch (error) {
+        console.error('Error playing audio:', error);
+      }
+    }
+  }, []);
+
+  const pause = useCallback(() => {
+    if (audioRef.current) {
+      audioRef.current.pause();
+      setIsPlaying(false);
+    }
+  }, []);
 
   useEffect(() => {
     if (audioRef.current) {
@@ -220,16 +237,23 @@ export function AudioPlayer({
       {/* Cover image for audio */}
       {coverImage && (
         <div className="relative w-full aspect-video">
-          <img
-            src={coverImage}
-            alt={title}
-            className="w-full h-full object-cover"
-            onError={(e) => {
-              // Fallback to a default music cover if image fails to load
-              e.currentTarget.src = '/images/default-music-cover.jpg';
-              e.currentTarget.onerror = null; // Prevent infinite loop
-            }}
-          />
+          <div className="relative w-full h-full">
+            <NextImage
+              src={coverImage}
+              alt={title}
+              fill
+              className="object-cover"
+              sizes="(max-width: 768px) 100vw, 50vw"
+              onError={() => {
+                // Handle error through onError prop instead of DOM event
+                const fallbackImage = '/images/default-music-cover.jpg';
+                if (coverImage !== fallbackImage) {
+                  // Update coverImage state in parent or handle differently
+                  console.error('Image failed to load, using fallback');
+                }
+              }}
+            />
+          </div>
           <div className="absolute inset-0 bg-gradient-to-b from-transparent to-black/30" />
         </div>
       )}

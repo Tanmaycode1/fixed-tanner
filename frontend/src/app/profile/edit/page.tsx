@@ -20,26 +20,20 @@ import {
   Globe,
   Lock,
   X,
-  Image as ImageIcon,
-  ChevronLeft,
-  Pencil,
-  Link as LinkIcon,
-  MapPin,
   Mail,
   Instagram,
   Twitter
 } from 'lucide-react';
 import Webcam from 'react-webcam';
-import { z } from 'zod';
 import {
   Select,
   SelectContent,
   SelectGroup,
   SelectItem,
-  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { default as NextImage } from 'next/image';
 
 interface ProfileFormData {
   first_name: string;
@@ -62,31 +56,11 @@ interface ProfileFormData {
   };
 }
 
-const profileSchema = z.object({
-  first_name: z.string().min(1, 'First name is required'),
-  last_name: z.string().min(1, 'Last name is required'),
-  bio: z.string().max(500, 'Bio must be less than 500 characters').optional(),
-  website: z.string().url().optional().or(z.literal('')),
-  phone: z.string().optional(),
-  location: z.string().optional(),
-  birth_date: z.string().optional(),
-  gender: z.enum(['MALE', 'FEMALE', 'OTHER', 'PREFER_NOT_TO_SAY']).optional(),
-  occupation: z.string().optional(),
-  company: z.string().optional(),
-  education: z.string().optional(),
-  account_privacy: z.enum(['PUBLIC', 'PRIVATE']).default('PUBLIC'),
-  social_links: z.object({
-    twitter: z.string().optional(),
-    github: z.string().optional(),
-    linkedin: z.string().optional(),
-    website: z.string().url().optional().or(z.literal(''))
-  }).optional()
-});
+
 
 export default function EditProfilePage() {
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const videoRef = useRef<HTMLVideoElement>(null);
   const webcamRef = useRef<Webcam>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -94,8 +68,6 @@ export default function EditProfilePage() {
   const [currentAvatar, setCurrentAvatar] = useState<string | null>(null);
   const [showAvatarModal, setShowAvatarModal] = useState(false);
   const [showCamera, setShowCamera] = useState(false);
-  const [cameraLoading, setCameraLoading] = useState(false);
-  const [cameraError, setCameraError] = useState<string | null>(null);
   const [crop, setCrop] = useState<Point>({ x: 0, y: 0 });
   const [zoom, setZoom] = useState(1);
   const [croppedAreaPixels, setCroppedAreaPixels] = useState<Area | null>(null);
@@ -288,15 +260,7 @@ export default function EditProfilePage() {
     }
   };
 
-  const onImageLoad = (e: React.SyntheticEvent<HTMLImageElement>) => {
-    const { width, height } = e.currentTarget;
-    const cropSize = Math.min(width, height) * 0.8; // 80% of the smaller dimension
-    
-    setCrop({
-      x: (width - cropSize) / 2,
-      y: (height - cropSize) / 2,
-    });
-  };
+
 
   if (loading) {
     return (
@@ -358,11 +322,15 @@ export default function EditProfilePage() {
                 <div className="relative group">
                   <div className="w-32 h-32 rounded-full overflow-hidden bg-gradient-to-br from-gray-100 to-gray-50 dark:from-gray-700 dark:to-gray-800 ring-4 ring-white dark:ring-gray-800 shadow-lg">
                     {currentAvatar ? (
-                      <img 
-                        src={currentAvatar} 
-                        alt="Profile"
-                        className="w-full h-full object-cover"
-                      />
+                      <div className="relative w-full h-full">
+                        <NextImage
+                          src={currentAvatar}
+                          alt="Profile"
+                          fill
+                          className="object-cover"
+                          sizes="(max-width: 768px) 100vw, 33vw"
+                        />
+                      </div>
                     ) : (
                       <div className="w-full h-full flex items-center justify-center">
                         <User className="w-12 h-12 text-gray-400 dark:text-gray-500" />

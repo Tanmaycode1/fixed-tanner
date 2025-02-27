@@ -1,4 +1,4 @@
-// File: /Users/tanmayarora/Desktop/testing/neuhu.com-main/frontend/src/app/notifications/layout.tsx
+// File: /Users/tanmayarora/Desktop/testing/fixed-tanner/frontend/src/app/notifications/layout.tsx
 import * as entry from '../../../../src/app/notifications/layout.js'
 import type { ResolvingMetadata, ResolvingViewport } from 'next/dist/lib/metadata/types/metadata-interface.js'
 

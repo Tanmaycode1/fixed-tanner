@@ -17,10 +17,10 @@ export const CaughtUpAnimation = () => {
         <CheckCircle className="w-16 h-16 text-primary-500 mb-4" />
       </motion.div>
       <h3 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">
-        You're All Caught Up!
+        You&apos;re All Caught Up!
       </h3>
       <p className="text-gray-600 dark:text-gray-300 text-center">
-        You've seen all the latest posts. Check back later for more updates!
+        You&apos;ve seen all the latest posts. Check back later for more updates!
       </p>
     </motion.div>
   );

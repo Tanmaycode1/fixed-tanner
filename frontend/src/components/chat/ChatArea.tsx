@@ -17,6 +17,7 @@ interface ChatAreaProps {
   onSendMessage: () => void;
   onScroll: (e: React.UIEvent<HTMLDivElement>) => void;
   loadingMore: boolean;
+  socket: WebSocket | null;
 }
 
 function getDateLabel(date: Date): string {
@@ -40,20 +41,18 @@ export default function ChatArea({
   onNewMessageChange,
   onSendMessage,
   onScroll,
-  loadingMore
+  loadingMore,
+  socket
 }: ChatAreaProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [isAtBottom, setIsAtBottom] = useState(true);
 
+  // Scroll to bottom when messages change if already at bottom
   useEffect(() => {
     if (isAtBottom) {
       messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
   }, [messages, isAtBottom]);
-
-  useEffect(() => {
-    console.log('Messages updated:', messages);
-  }, [messages]);
 
   const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
     const target = e.target as HTMLDivElement;
@@ -63,7 +62,6 @@ export default function ChatArea({
     
     const isNearTop = target.scrollTop <= 100;
     if (isNearTop && !loadingMore) {
-      console.log('Near top, loading more messages...');
       onScroll(e);
     }
   };
@@ -81,9 +79,31 @@ export default function ChatArea({
     return `Last seen ${format(date, 'MMM d')} at ${format(date, 'HH:mm')}`;
   };
 
+  // Determine if message is from other user
+  const isFromOtherUser = (message: Message) => {
+    // For API messages (where sender is a string ID)
+    if (typeof message.sender === 'string') {
+      return message.sender === room.other_participant.id;
+    }
+    
+    // For socket messages (where sender is an object with id property)
+    if (message.sender && typeof message.sender === 'object' && 'id' in message.sender) {
+      return message.sender.id === room.other_participant.id;
+    }
+    
+    // Fallback
+    return false;
+  };
+
+  // Add debug log to track prop changes
+  useEffect(() => {
+    console.log('ChatArea isOnline status:', isOnline);
+    console.log('ChatArea other participant:', room.other_participant.id);
+  }, [isOnline, room.other_participant.id]);
+
   return (
     <div className="flex flex-col fixed md:relative inset-0 md:inset-auto bg-white dark:bg-gray-900 h-[100dvh] md:h-full mt-16 mb-20 md:my-0">
-      {/* Fixed Header - Higher z-index and proper positioning */}
+      {/* Fixed Header */}
       <div className="sticky top-16 md:top-0 flex-none p-4 border-b border-gray-200 dark:border-gray-800 flex items-center justify-between bg-white dark:bg-gray-900 z-20">
         <div className="flex items-center space-x-3">
           <button
@@ -107,25 +127,30 @@ export default function ChatArea({
             <div>
               <h2 className="font-medium">{room.other_participant.username}</h2>
               <p className="text-sm text-gray-500">
-                {isOnline ? (
-                  <span className="flex items-center text-green-500">
-                    <span className="w-2 h-2 bg-green-500 rounded-full mr-2"></span>
-                    Online
-                  </span>
-                ) : (
-                  <span className="flex items-center text-gray-400">
-                    <span className="w-2 h-2 bg-gray-400 rounded-full mr-2"></span>
-                    Offline
-                    {lastSeen && ` • ${getLastSeen()}`}
-                  </span>
-                )}
+                <span className="flex items-center text-gray-400">
+                  <span 
+                    className={`w-2 h-2 rounded-full mr-2 ${
+                      isOnline
+                        ? 'bg-green-500' 
+                        : 'bg-gray-400'
+                    }`}
+                  />
+                  {isOnline ? (
+                    <span className="text-green-500">Online</span>
+                  ) : (
+                    <>
+                      <span>Offline</span>
+                      {lastSeen && ` • ${getLastSeen()}`}
+                    </>
+                  )}
+                </span>
               </p>
             </div>
           </div>
         </div>
       </div>
 
-      {/* Scrollable Messages - Adjust padding for fixed elements */}
+      {/* Scrollable Messages */}
       <div 
         className="flex-1 overflow-y-auto px-4 py-2 chat-messages-container"
         onScroll={handleScroll}
@@ -149,8 +174,8 @@ export default function ChatArea({
             const showDateLabel = index === 0 || 
               !isSameDay(messageDate, new Date(previousMessage?.created_at || ''));
             
-            // Message is from the other participant if sender ID matches their ID
-            const isFromOtherUser = message.sender === room.other_participant.id;
+            // Determine message alignment
+            const fromOtherUser = isFromOtherUser(message);
             
             return (
               <div key={message.id}>
@@ -165,23 +190,23 @@ export default function ChatArea({
                 )}
                 
                 <div 
-                  className={`flex ${isFromOtherUser ? 'justify-start' : 'justify-end'}`}
+                  className={`flex ${fromOtherUser ? 'justify-start' : 'justify-end'}`}
                 >
                   <div
                     className={`max-w-[70%] rounded-lg p-3 ${
-                      isFromOtherUser
+                      fromOtherUser
                         ? 'bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-gray-100'
                         : 'bg-blue-600 text-white'
                     }`}
                   >
                     <p className="break-words">{message.content}</p>
                     <div className={`text-xs mt-1 ${
-                      isFromOtherUser 
+                      fromOtherUser 
                         ? 'text-gray-500 dark:text-gray-400'
                         : 'text-blue-100'
                     }`}>
                       {format(messageDate, 'HH:mm')}
-                      {!isFromOtherUser && (
+                      {!fromOtherUser && (
                         <span className="ml-2">
                           {message.is_read ? '✓✓' : '✓'}
                         </span>
@@ -196,7 +221,7 @@ export default function ChatArea({
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Fixed Input Area - Higher z-index and proper positioning */}
+      {/* Fixed Input Area */}
       <div className="sticky bottom-20 md:bottom-0 left-0 right-0 flex-none bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-800 z-20">
         <div className="p-4 max-w-[100%] mx-auto">
           <div className="flex items-center space-x-2">
@@ -225,4 +250,4 @@ export default function ChatArea({
       </div>
     </div>
   );
-} 
+}

@@ -1,11 +1,10 @@
 "use client";
 
-import { motion } from 'framer-motion';
-import { Edit, User, Camera, MapPin, Link as LinkIcon, Twitter, Instagram, Globe, Settings, Users } from 'lucide-react';
+import { Edit, User} from 'lucide-react';
 import Link from 'next/link';
-import { Button } from '@/components/ui/button';
 import type { UserProfile } from '@/types/user';
 import { ProfileStats } from './ProfileStats';
+import { default as NextImage } from 'next/image';
 
 interface ProfileHeaderProps {
   profile: UserProfile;
@@ -34,11 +33,15 @@ export function ProfileHeader({
             {/* Avatar */}
             <div className="relative shrink-0 mb-4 sm:mb-0">
               {profile.avatar_url ? (
-                <img
-                  src={profile.avatar_url}
-                  alt={profile.username}
-                  className="w-24 h-24 sm:w-32 sm:h-32 rounded-full object-cover ring-4 ring-gray-50 dark:ring-gray-800"
-                />
+                <div className="relative w-24 h-24 sm:w-32 sm:h-32">
+                  <NextImage
+                    src={profile.avatar_url}
+                    alt={profile.username}
+                    fill
+                    className="rounded-full object-cover ring-4 ring-gray-50 dark:ring-gray-800"
+                    sizes="(max-width: 640px) 96px, 128px"
+                  />
+                </div>
               ) : (
                 <div className="w-24 h-24 sm:w-32 sm:h-32 rounded-full bg-primary/10 flex items-center justify-center ring-4 ring-gray-50 dark:ring-gray-800">
                   <User className="h-12 w-12 sm:h-16 sm:w-16 text-primary" />
@@ -87,7 +90,7 @@ export function ProfileHeader({
             <div className="flex justify-center sm:justify-start mt-4">
               <ProfileStats
                 postCount={profile.post_count || 0}
-                followerCount={profile.followers_count}
+                followerCount={profile.follower_count }
                 followingCount={profile.following_count}
                 onFollowersClick={isPublicProfile ? undefined : onFollowersClick}
                 onFollowingClick={isPublicProfile ? undefined : onFollowingClick}

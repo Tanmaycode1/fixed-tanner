@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { motion } from 'framer-motion';
-import { Grid, PlayCircle, Newspaper, Bookmark, Image, Heart, MessageCircle } from 'lucide-react';
+import { Grid, PlayCircle, Newspaper, Bookmark, Image as ImageIcon, Heart, MessageCircle } from 'lucide-react';
 import type { UserProfile } from '@/types/user';
+import { default as NextImage } from 'next/image';
 
 interface ProfileTabsProps {
   profile: UserProfile;
@@ -32,7 +33,7 @@ const mockPosts = [
   // Add more mock posts...
 ];
 
-export function ProfileTabs({ profile }: ProfileTabsProps) {
+export function ProfileTabs({}: ProfileTabsProps) {
   const [activeTab, setActiveTab] = useState('posts');
 
   const renderTabContent = () => {
@@ -49,14 +50,18 @@ export function ProfileTabs({ profile }: ProfileTabsProps) {
                 className="aspect-square bg-gray-100 dark:bg-gray-800 rounded-lg overflow-hidden group relative"
               >
                 {post.thumbnail ? (
-                  <img
-                    src={post.thumbnail}
-                    alt={`Post ${post.id}`}
-                    className="w-full h-full object-cover"
-                  />
+                  <div className="relative w-full h-full">
+                    <NextImage
+                      src={post.thumbnail}
+                      alt={`Post thumbnail ${post.id}`}
+                      fill
+                      className="object-cover"
+                      sizes="(max-width: 768px) 50vw, 33vw"
+                    />
+                  </div>
                 ) : (
                   <div className="absolute inset-0 flex items-center justify-center text-gray-400 dark:text-gray-600">
-                    <Image className="w-8 h-8" />
+                    <ImageIcon className="w-8 h-8" />
                   </div>
                 )}
                 

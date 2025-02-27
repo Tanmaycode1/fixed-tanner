@@ -6,14 +6,12 @@ import { toast } from 'react-hot-toast';
 import { userApi } from '@/services/api';
 import { Loader, Edit } from 'lucide-react';
 import Link from 'next/link';
-import Image from 'next/image';
 import { User } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { FollowButton } from '@/components/ui/follow-button';
 
 // Components
 import { ProfileHeader } from '@/components/profile/ProfileHeader';
-import { ProfileTabs } from '@/components/profile/ProfileTabs';
 import { PostCard } from '@/components/posts/PostCard';
 import { FollowModal } from '@/components/profile/FollowModal';
 
@@ -21,16 +19,27 @@ import { FollowModal } from '@/components/profile/FollowModal';
 import type { UserProfile } from '@/types/user';
 import { postsApi, Post } from '@/services/postsApi';
 
+interface FollowUser {
+  id: string;
+  username: string;
+  email: string;
+  first_name: string;
+  last_name: string;
+  avatar: string | null;
+  bio: string;
+  is_followed: boolean;
+}
+
 export default function ProfilePage() {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'all' | 'news' | 'audio'>('all');
-  const [suggestions, setSuggestions] = useState<any[]>([]);
+  const [suggestions, setSuggestions] = useState<FollowUser[]>([]);
   const [loadingSuggestions, setLoadingSuggestions] = useState(true);
   const [showFollowersModal, setShowFollowersModal] = useState(false);
   const [showFollowingModal, setShowFollowingModal] = useState(false);
-  const [followers, setFollowers] = useState<any[]>([]);
-  const [following, setFollowing] = useState<any[]>([]);
+  const [followers, setFollowers] = useState<FollowUser[]>([]);
+  const [following, setFollowing] = useState<FollowUser[]>([]);
   const [loadingFollowers, setLoadingFollowers] = useState(false);
   const [loadingFollowing, setLoadingFollowing] = useState(false);
   const [currentUserFollowing, setCurrentUserFollowing] = useState<string[]>([]);
@@ -112,7 +121,7 @@ export default function ProfilePage() {
     try {
       const response = await userApi.getFollowing();
       if (response?.success) {
-        const followingIds = response.data.results.map((user: any) => user.id);
+        const followingIds = response.data.results.map((user: FollowUser) => user.id);
         setCurrentUserFollowing(followingIds);
       }
     } catch (error) {
@@ -134,16 +143,6 @@ export default function ProfilePage() {
       toast.error('Failed to load posts');
     } finally {
       setLoadingPosts(false);
-    }
-  };
-
-  const handleFollow = async (userId: string) => {
-    try {
-      await userApi.followUser(userId);
-      loadSuggestions();
-      toast.success('User followed successfully');
-    } catch (error) {
-      toast.error('Failed to follow user');
     }
   };
 

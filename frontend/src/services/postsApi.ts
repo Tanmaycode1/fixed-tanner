@@ -1,6 +1,7 @@
 // src/services/postsApi.ts
 
 import { api } from './api';
+import { AxiosError } from 'axios';
 
 export interface CreatePostData {
   type: 'NEWS' | 'AUDIO';
@@ -49,12 +50,12 @@ export interface Post {
   trending_data: TrendingData;
 }
 
-interface ApiResponse<T = any> {
+interface ApiResponse<T = unknown> {
   success: boolean;
   data?: T;
   error?: string;
   status?: number;
-  details?: any;
+  details?: Record<string, unknown>;
 }
 
 interface SearchResponse {
@@ -78,6 +79,14 @@ export interface HighlightsResponse {
   latest_news: Post | null;
   trending_audio: Post | null;
   featured_post: Post | null;
+}
+
+interface ApiErrorResponse {
+  message?: string;
+  detail?: string;
+  data?: {
+    message?: string;
+  };
 }
 
 export const postsApi = {
@@ -107,21 +116,22 @@ export const postsApi = {
         status: response.status
       };
 
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const axiosError = error as AxiosError<ApiErrorResponse>;
+      
       console.error('Create Post Error:', {
-        message: error?.message,
-        response: error?.response?.data,
-        status: error?.response?.status
+        message: axiosError.response?.data?.message,
+        response: axiosError.response?.data,
+        status: axiosError.response?.status
       });
 
       return {
         success: false,
-        error: error?.response?.data?.detail || 
-               error?.response?.data?.message || 
-               error?.message || 
-               'Failed to create post',
-        status: error?.response?.status || 500,
-        details: error?.response?.data
+        error: axiosError.response?.data?.message || 
+               axiosError.response?.data?.detail || 
+               axiosError.response?.data?.data?.message || 
+               'Default error message',
+        status: axiosError.response?.status
       };
     }
   },
@@ -139,12 +149,13 @@ export const postsApi = {
         data: response.data,
         status: response.status
       };
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const axiosError = error as AxiosError<ApiErrorResponse>;
       console.error('Get Posts Error:', error);
       return {
         success: false,
-        error: error.response?.data?.message || 'Failed to fetch posts',
-        status: error.response?.status
+        error: axiosError.response?.data?.message || 'Failed to fetch posts',
+        status: axiosError.response?.status
       };
     }
   },
@@ -157,12 +168,13 @@ export const postsApi = {
         data: response.data,
         status: response.status
       };
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const axiosError = error as AxiosError<ApiErrorResponse>;
       console.error('Get Post Error:', error);
       return {
         success: false,
-        error: error.response?.data?.message || 'Failed to fetch post',
-        status: error.response?.status
+        error: axiosError.response?.data?.message || 'Failed to fetch post',
+        status: axiosError.response?.status
       };
     }
   },
@@ -175,12 +187,14 @@ export const postsApi = {
         data: response.data,
         status: response.status
       };
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const axiosError = error as AxiosError<ApiErrorResponse>;
+      
       console.error('Like Post Error:', error);
       return {
         success: false,
-        error: error.response?.data?.message || 'Failed to like post',
-        status: error.response?.status
+        error: axiosError.response?.data?.message || 'Failed to like post',
+        status: axiosError.response?.status
       };
     }
   },
@@ -193,12 +207,14 @@ export const postsApi = {
         data: response.data,
         status: response.status
       };
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const axiosError = error as AxiosError<ApiErrorResponse>;
+      
       console.error('Get Feed Error:', error);
       return {
         success: false,
-        error: error.response?.data?.message || 'Failed to fetch feed',
-        status: error.response?.status
+        error: axiosError.response?.data?.message || 'Failed to fetch feed',
+        status: axiosError.response?.status
       };
     }
   },
@@ -216,11 +232,13 @@ export const postsApi = {
       }
       
       throw new Error('Invalid response format');
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const axiosError = error as AxiosError<ApiErrorResponse>;
+      
       console.error('Get Trending Posts Error:', error);
       return {
         success: false,
-        error: error.response?.data?.message || 'Failed to fetch trending posts',
+        error: axiosError.response?.data?.message || 'Failed to fetch trending posts',
         data: {
           results: [],
           count: 0,
@@ -239,12 +257,14 @@ export const postsApi = {
         data: response.data.data,
         status: response.status
       };
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const axiosError = error as AxiosError<ApiErrorResponse>;
+      
       console.error('Add Comment Error:', error);
       return {
         success: false,
-        error: error.response?.data?.message || 'Failed to add comment',
-        status: error.response?.status
+        error: axiosError.response?.data?.message || 'Failed to add comment',
+        status: axiosError.response?.status
       };
     }
   },
@@ -257,12 +277,14 @@ export const postsApi = {
         data: response.data.data,
         status: response.status
       };
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const axiosError = error as AxiosError<ApiErrorResponse>;
+      
       console.error('Get Comments Error:', error);
       return {
         success: false,
-        error: error.response?.data?.message || 'Failed to fetch comments',
-        status: error.response?.status
+        error: axiosError.response?.data?.message || 'Failed to fetch comments',
+        status: axiosError.response?.status
       };
     }
   },
@@ -278,12 +300,14 @@ export const postsApi = {
         data: response.data,
         status: response.status
       };
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const axiosError = error as AxiosError<ApiErrorResponse>;
+      
       console.error('Share Post Error:', error);
       return {
         success: false,
-        error: error.response?.data?.message || 'Failed to share post',
-        status: error.response?.status
+        error: axiosError.response?.data?.message || 'Failed to share post',
+        status: axiosError.response?.status
       };
     }
   },
@@ -302,12 +326,14 @@ export const postsApi = {
         },
         status: response.status
       };
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const axiosError = error as AxiosError<ApiErrorResponse>;
+      
       console.error('Search Error:', error);
       return {
         success: false,
-        error: error.response?.data?.message || 'Failed to perform search',
-        status: error.response?.status
+        error: axiosError.response?.data?.message || 'Failed to perform search',
+        status: axiosError.response?.status
       };
     }
   },
@@ -320,12 +346,14 @@ export const postsApi = {
         data: response.data,
         status: response.status
       };
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const axiosError = error as AxiosError<ApiErrorResponse>;
+      
       console.error('Get My Posts Error:', error);
       return {
         success: false,
-        error: error.response?.data?.message || 'Failed to fetch your posts',
-        status: error.response?.status
+        error: axiosError.response?.data?.message || 'Failed to fetch your posts',
+        status: axiosError.response?.status
       };
     }
   },
@@ -341,12 +369,14 @@ export const postsApi = {
         data: response.data.data,
         status: response.status
       };
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const axiosError = error as AxiosError<ApiErrorResponse>;
+      
       console.error('Edit Comment Error:', error);
       return {
         success: false,
-        error: error.response?.data?.message || 'Failed to edit comment',
-        status: error.response?.status
+        error: axiosError.response?.data?.message || 'Failed to edit comment',
+        status: axiosError.response?.status
       };
     }
   },
@@ -361,12 +391,14 @@ export const postsApi = {
         data: response.data,
         status: response.status
       };
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const axiosError = error as AxiosError<ApiErrorResponse>;
+      
       console.error('Delete Comment Error:', error);
       return {
         success: false,
-        error: error.response?.data?.message || 'Failed to delete comment',
-        status: error.response?.status
+        error: axiosError.response?.data?.message || 'Failed to delete comment',
+        status: axiosError.response?.status
       };
     }
   },
@@ -379,12 +411,14 @@ export const postsApi = {
         data: response.data,
         status: response.status
       };
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const axiosError = error as AxiosError<ApiErrorResponse>;
+      
       console.error('Reply to Comment Error:', error);
       return {
         success: false,
-        error: error.response?.data?.message || 'Failed to reply to comment',
-        status: error.response?.status
+        error: axiosError.response?.data?.message || 'Failed to reply to comment',
+        status: axiosError.response?.status
       };
     }
   },
@@ -397,12 +431,14 @@ export const postsApi = {
         data: response.data.data || [],
         status: response.status
       };
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const axiosError = error as AxiosError<ApiErrorResponse>;
+      
       console.error('Get Trending Searches Error:', error);
       return {
         success: false,
-        error: error.response?.data?.message || 'Failed to fetch trending searches',
-        status: error.response?.status || 500,
+        error: axiosError.response?.data?.message || 'Failed to fetch trending searches',
+        status: axiosError.response?.status || 500,
         data: []
       };
     }
@@ -421,12 +457,14 @@ export const postsApi = {
         data: response.data,
         status: response.status
       };
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const axiosError = error as AxiosError<ApiErrorResponse>;
+      
       console.error('Get User Posts Error:', error);
       return {
         success: false,
-        error: error.response?.data?.message || 'Failed to fetch user posts',
-        status: error.response?.status
+        error: axiosError.response?.data?.message || 'Failed to fetch user posts',
+        status: axiosError.response?.status
       };
     }
   },
@@ -439,12 +477,14 @@ export const postsApi = {
         data: response.data.data,
         status: response.status
       };
-    } catch (error: any) {
+    } catch (error: unknown) {
+      const axiosError = error as AxiosError<ApiErrorResponse>;
+      
       console.error('Get Highlights Error:', error);
       return {
         success: false,
-        error: error.response?.data?.message || 'Failed to fetch highlights',
-        status: error.response?.status,
+        error: axiosError.response?.data?.message || 'Failed to fetch highlights',
+        status: axiosError.response?.status,
         data: {
           latest_news: null,
           trending_audio: null,

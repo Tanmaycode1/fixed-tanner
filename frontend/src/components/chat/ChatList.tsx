@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Search, User, Loader2 } from 'lucide-react';
 import { Input } from '@/components/ui/Input';
 import { ChatRoom } from '@/types/chat';
+import { default as NextImage } from 'next/image';
 
 interface ChatListProps {
   chatRooms: ChatRoom[];
@@ -133,9 +134,17 @@ function RoomList({ rooms, selectedRoom, onSelectRoom }: RoomListProps) {
 
 function UserAvatar({ user }: UserAvatarProps) {
   return (
-    <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
+    <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center relative">
       {user.avatar_url ? (
-        <img src={user.avatar_url} alt={user.username} className="w-full h-full rounded-full" />
+        <div className="relative w-full h-full">
+          <NextImage
+            src={user.avatar_url}
+            alt={user.username}
+            fill
+            className="rounded-full object-cover"
+            sizes="40px"
+          />
+        </div>
       ) : (
         <User className="h-5 w-5 text-primary" />
       )}

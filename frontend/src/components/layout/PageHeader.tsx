@@ -1,7 +1,6 @@
 "use client";
 
-import { Moon, Sun, Menu } from "lucide-react";
-import { useTheme } from "@/context/ThemeContext";
+import { Menu } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ChevronLeft } from "lucide-react";
 import { useRouter } from "next/navigation";
@@ -14,7 +13,7 @@ interface PageHeaderProps {
 }
 
 export function PageHeader({ title, showBack = true }: PageHeaderProps) {
-  const { theme, toggleTheme } = useTheme();
+
   const router = useRouter();
   const [showMobileMenu, setShowMobileMenu] = useState(false);
 
@@ -36,17 +35,17 @@ export function PageHeader({ title, showBack = true }: PageHeaderProps) {
             <h1 className="text-lg font-semibold">{title}</h1>
           </div>
           <div className="flex items-center gap-2">
-            <Button
+            {/* <Button
               variant="ghost"
               size="icon"
               onClick={toggleTheme}
             >
-              {/* {theme === 'dark' ? (
+              {theme === 'dark' ? (
                 <Sun className="h-4 w-4" />
               ) : (
                 <Moon className="h-4 w-4" />
-              )} */}
-            </Button>
+              )}
+            </Button> */}
             <Button
               variant="ghost"
               size="icon"

@@ -5,7 +5,6 @@ import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import { BsChevronLeft, BsChevronRight } from 'react-icons/bs';
 import { postsApi, type Post } from '@/services/postsApi';
-import { Avatar } from '@/components/ui/avatar';
 import { Skeleton } from '@/components/ui/skeleton';
 
 export const Highlights = () => {

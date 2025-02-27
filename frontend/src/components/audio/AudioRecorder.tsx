@@ -3,7 +3,6 @@ import { useState, useRef, useEffect } from 'react';
 import { Mic, Square, Upload, Trash2, X, Play, Pause } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { motion, AnimatePresence } from 'framer-motion';
-import { cn } from '@/lib/utils';
 
 interface AudioRecorderProps {
   onAudioChange: (file: File) => void;
@@ -16,7 +15,6 @@ export const AudioRecorder = ({ onAudioChange }: AudioRecorderProps) => {
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
-  const [visualizerData, setVisualizerData] = useState<number[]>([]);
   const [recordingBars, setRecordingBars] = useState<number[]>(Array(40).fill(0));
   
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);

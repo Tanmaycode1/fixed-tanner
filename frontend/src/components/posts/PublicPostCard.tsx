@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import type { Post } from '@/services/postsApi';
+import { default as NextImage } from 'next/image';
 
 interface PublicPostCardProps {
   post: Post;
@@ -119,11 +120,15 @@ export function PublicPostCard({ post }: PublicPostCardProps) {
         {/* Image */}
         {post.image_url && (
           <div className="relative aspect-video">
-            <img
-              src={getImageUrl(post.image_url)}
-              alt={post.title}
-              className="w-full h-full object-cover rounded-lg"
-            />
+            <div className="relative w-full h-full">
+              <NextImage
+                src={getImageUrl(post.image_url) || ''}
+                alt={post.title}
+                fill
+                className="object-cover rounded-lg"
+                sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw"
+              />
+            </div>
           </div>
         )}
 

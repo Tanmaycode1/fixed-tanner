@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
 import { toast } from 'react-hot-toast';
 
@@ -9,11 +9,7 @@ export function RouteGuard({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const [authorized, setAuthorized] = useState(false);
 
-  useEffect(() => {
-    authCheck(pathname);
-  }, [pathname]);
-
-  const authCheck = (url: string) => {
+  const authCheck = useCallback((url: string) => {
     // Define public paths that don't require authentication
     const publicPaths = [
       '/',                // Landing page
@@ -44,7 +40,11 @@ export function RouteGuard({ children }: { children: React.ReactNode }) {
 
     // User has token, allow access
     setAuthorized(true);
-  };
+  }, [router]);
+
+  useEffect(() => {
+    authCheck(pathname);
+  }, [pathname, authCheck]);
 
   // Show loading or nothing while checking authentication
   if (pathname === undefined) {

@@ -1,9 +1,8 @@
 "use client";
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useRouter } from 'next/navigation';
-import { useTheme } from 'next-themes';
 import {
   Bell,
   Heart,
@@ -13,7 +12,6 @@ import {
   ChevronRight,
   CheckCircle2,
   Filter,
-  Settings,
   Trash2,
   X
 } from 'lucide-react';
@@ -25,13 +23,8 @@ import { formatDistanceToNow } from 'date-fns';
 import { notificationApi } from '@/services/api';
 import { Card } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+
 
 // Interfaces
 interface NotificationSender {
@@ -56,15 +49,6 @@ interface Notification {
   extra_data: NotificationExtraData;
 }
 
-interface PaginationData {
-  count: number;
-  total_pages: number;
-  current_page: number;
-  has_next: boolean;
-  has_previous: boolean;
-  next_page: number | null;
-  previous_page: number | null;
-}
 
 interface NotificationTypeConfig {
   icon: React.ReactNode;
@@ -72,38 +56,18 @@ interface NotificationTypeConfig {
   textClass: string;
 }
 
-// Animation variants
-const containerVariants = {
-  hidden: { opacity: 0 },
-  visible: { 
-    opacity: 1,
-    transition: { staggerChildren: 0.1 }
-  }
-};
 
-const itemVariants = {
-  hidden: { opacity: 0, y: 20 },
-  visible: { 
-    opacity: 1, 
-    y: 0,
-    transition: { type: "spring", stiffness: 100 }
-  }
-};
+
 
 export default function NotificationsPage() {
   const router = useRouter();
-  const { theme } = useTheme();
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedType, setSelectedType] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'all' | 'unread'>('all');
   const [showMobileFilters, setShowMobileFilters] = useState(false);
 
-  useEffect(() => {
-    loadNotifications();
-  }, [activeTab, selectedType]);
-
-  const loadNotifications = async () => {
+  const loadNotifications = useCallback(async () => {
     try {
       setLoading(true);
       const response = await notificationApi.getNotifications(1, {
@@ -120,7 +84,11 @@ export default function NotificationsPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [activeTab, selectedType]);
+
+  useEffect(() => {
+    loadNotifications();
+  }, [activeTab, selectedType, loadNotifications]);
 
   const handleMarkAllRead = async () => {
     try {

@@ -1,10 +1,10 @@
 "use client";
 
-import { useState, useEffect, use } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import { toast } from 'react-hot-toast';
 import { userApi, postsApi } from '@/services/api';
-import { Loader2, User } from 'lucide-react';
+import { Loader2} from 'lucide-react';
 import { OtherProfileHeader } from '@/components/profile/OtherProfileHeader';
 import { PostCard } from '@/components/posts/PostCard';
 import type { UserProfile } from '@/types/user';
@@ -13,6 +13,7 @@ import { getFullImageUrl } from '@/services/api';
 import Image from 'next/image';
 import Link from 'next/link';
 import { FollowButton } from '@/components/ui/follow-button';
+import { useParams } from 'next/navigation';
 
 interface PageProps {
   params: Promise<{ userId: string }>;
@@ -38,7 +39,7 @@ function OtherProfileContent({ userId }: { userId: string }) {
   const [suggestionsLoading, setSuggestionsLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<TabType>('all');
 
-  const fetchProfile = async () => {
+  const fetchProfile = useCallback(async () => {
     try {
       const response = await userApi.getUserProfile(userId);
       if (response.success) {
@@ -52,9 +53,9 @@ function OtherProfileContent({ userId }: { userId: string }) {
     } finally {
       setLoading(false);
     }
-  };
+  }, [userId]);
 
-  const fetchUserPosts = async (type?: string) => {
+  const fetchUserPosts = useCallback(async (type?: string) => {
     try {
       setPostsLoading(true);
       const response = await postsApi.getUserPosts(userId, type);
@@ -67,7 +68,7 @@ function OtherProfileContent({ userId }: { userId: string }) {
     } finally {
       setPostsLoading(false);
     }
-  };
+  }, [userId]);
 
   const loadSuggestions = async () => {
     try {
@@ -88,14 +89,14 @@ function OtherProfileContent({ userId }: { userId: string }) {
       fetchProfile();
       loadSuggestions();
     }
-  }, [userId]);
+  }, [userId, fetchProfile, loadSuggestions]);
 
   useEffect(() => {
     if (userId) {
       const type = activeTab === 'all' ? undefined : activeTab.toUpperCase();
       fetchUserPosts(type);
     }
-  }, [userId, activeTab]);
+  }, [userId, activeTab, fetchUserPosts]);
 
   const handleFollowChange = async (isFollowing: boolean) => {
     if (!profile) return;
@@ -105,7 +106,7 @@ function OtherProfileContent({ userId }: { userId: string }) {
       return {
         ...prev,
         is_followed: isFollowing,
-        followers_count: isFollowing ? prev.followers_count + 1 : prev.followers_count - 1
+        followers_count: isFollowing ? prev.follower_count + 1 : prev.follower_count - 1
       };
     });
   };
@@ -346,7 +347,7 @@ function OtherProfileContent({ userId }: { userId: string }) {
   );
 }
 
-export default function UserProfilePage({ params }: PageProps) {
-  const resolvedParams = use(params);
-  return <OtherProfileContent userId={resolvedParams.userId} />;
+export default function UserProfilePage() {
+  const params = useParams();
+  return <OtherProfileContent userId={params.userId as string} />;
 }

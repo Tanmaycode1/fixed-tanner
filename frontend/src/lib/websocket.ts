@@ -21,7 +21,7 @@ export class WebSocketClient {
     this.onDisconnect = onDisconnect;
   }
 
-  connect(token: string) {
+  connect() {
     if (!this.url || this.isConnecting || this.ws?.readyState === WebSocket.OPEN) {
       console.log('WebSocket connection skipped:', {
         url: this.url,
@@ -155,7 +155,7 @@ export class WebSocketClient {
         const token = localStorage.getItem('access_token');
         if (token) {
           console.log(`Attempting reconnection ${this.reconnectAttempts}`);
-          this.connect(token);
+          this.connect();
         } else {
           console.warn('No access token available for reconnection');
         }
@@ -171,7 +171,7 @@ export class WebSocketClient {
       console.warn('WebSocket is not connected. Message not sent:', { type, payload });
       const token = localStorage.getItem('access_token');
       if (token) {
-        this.connect(token);
+        this.connect();
       }
       return;
     }

@@ -117,43 +117,40 @@ class PostViewSet(BaseViewSet):
             audio_file = self.request.FILES.get('audio_file')
             post_type = self.request.data.get('type')
 
-            # Debug logging
-            print("Creating post:", {
-                'type': post_type,
-                'title': self.request.data.get('title'),
-                'has_image': bool(image),
-                'has_audio': bool(audio_file),
-                'data': dict(self.request.data),
-                'user': self.request.user.id  # Log the user ID
-            })
-
-            # Handle media files
+            # Handle image file
             image_path = None
-            audio_path = None
-
             if image:
                 try:
                     if not image.content_type.startswith('image/'):
                         raise ValidationError('Invalid image file type')
-                    image_path = handle_uploaded_file(image, 'posts/images')
+                    image_path = handle_uploaded_file(
+                        image, 
+                        directory='posts/images',
+                        is_image=True
+                    )
                 except Exception as e:
-                    print("Image processing error:", str(e))
                     raise ValidationError(f'Error processing image: {str(e)}')
 
+            # Handle audio file
+            audio_path = None
             if audio_file:
                 try:
                     if not audio_file.content_type.startswith('audio/'):
                         raise ValidationError('Invalid audio file type')
-                    audio_path = handle_uploaded_file(audio_file, 'posts/audio')
+                    audio_path = handle_uploaded_file(
+                        audio_file, 
+                        directory='posts/audio',
+                        is_image=False
+                    )
                 except Exception as e:
-                    print("Audio processing error:", str(e))
+                    # Cleanup image if audio fails
                     if image_path:
                         default_storage.delete(image_path)
                     raise ValidationError(f'Error processing audio: {str(e)}')
 
             # Create post with media paths
             post = serializer.save(
-                author=self.request.user,  # Explicitly set the author
+                author=self.request.user,
                 image=image_path,
                 audio_file=audio_path
             )
@@ -164,8 +161,7 @@ class PostViewSet(BaseViewSet):
             return post
 
         except Exception as e:
-            print("Final error in perform_create:", str(e))
-            # Cleanup any uploaded files
+            # Cleanup any uploaded files on error
             if image_path:
                 default_storage.delete(image_path)
             if audio_path:

@@ -3,7 +3,7 @@ import { motion } from 'framer-motion';
 import Link from 'next/link';
 import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/button';
-import { authApi, ApiError } from '@/services/api';
+import { authApi} from '@/services/api';
 import { toast } from 'react-hot-toast';
 
 interface AuthFormProps {

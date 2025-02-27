@@ -8,6 +8,17 @@ import { authApi } from '@/services/api';
 import type { RegisterData } from '@/types/auth';
 import { toast } from 'react-hot-toast';
 
+// Add these interfaces at the top of the file, after the imports
+interface ApiError extends Error {
+  message: string;
+  response?: {
+    data?: {
+      errors?: Record<string, string[]>;
+      message?: string;
+    };
+  };
+}
+
 export default function Register() {
   const router = useRouter();
   const [isLoading, setIsLoading] = useState(false);
@@ -38,8 +49,9 @@ export default function Register() {
           toast.error(response.message || 'Registration failed');
         }
       }
-    } catch (error: any) {
-      const errorMessage = error.message || 'An unexpected error occurred';
+    } catch (error: unknown) {
+      const apiError = error as ApiError;
+      const errorMessage = apiError.message || 'An unexpected error occurred';
       toast.error(errorMessage);
       setErrors({
         non_field_errors: [errorMessage]

@@ -9,7 +9,7 @@ export interface UserProfile {
   social_links: Record<string, string>;
   account_privacy: 'PUBLIC' | 'PRIVATE';
   is_verified: boolean;
-  followers_count: number;
+  follower_count: number;
   following_count: number;
   post_count: number;
   phone?: string;

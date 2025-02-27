@@ -7,7 +7,13 @@ interface WebSocketOptions {
   onDisconnect?: () => void;
 }
 
-export function useWebSocket({ url, onMessage, onConnect, onDisconnect }: WebSocketOptions) {
+interface UseWebSocketReturn {
+  sendMessage: (message: any) => void;
+  isConnected: boolean;
+  socket: WebSocket | null;
+}
+
+export function useWebSocket({ url, onMessage, onConnect, onDisconnect }: WebSocketOptions): UseWebSocketReturn {
   const ws = useRef<WebSocket | null>(null);
   const isConnected = useRef(false);
 
@@ -48,6 +54,7 @@ export function useWebSocket({ url, onMessage, onConnect, onDisconnect }: WebSoc
 
   return {
     sendMessage,
-    isConnected: isConnected.current
+    isConnected: isConnected.current,
+    socket: ws.current
   };
 }

@@ -8,7 +8,8 @@ import { User } from 'lucide-react';
 import { ChatList } from '@/components/chat/ChatList';
 import ChatArea from '../../components/chat/ChatArea';
 import { ChatFiltersDialog } from '@/components/chat/ChatFiltersDialog';
-import { Message, ChatRoom, Filters, ApiResponse, PaginatedResponse } from '@/types/chat';
+import { Message, ChatRoom, Filters} from '@/types/chat';
+import { SearchUser } from '@/types/user';
 
 interface WebSocketMessage {
   type: string;
@@ -18,13 +19,23 @@ interface WebSocketMessage {
     sender: {
       id: string;
       username: string;
-      avatar: string | null;
+      avatar_url: string | null;
     };
     created_at: string;
     is_read: boolean;
   };
-  user_id?: string;
-  status?: 'online' | 'offline';
+  user_status?: {
+    user_id: string;
+    status: 'online' | 'offline';
+  };
+}
+
+interface LocalSearchUser {
+  id: string;
+  username: string;
+  avatar_url: string | null;
+  first_name?: string;
+  last_name?: string;
 }
 
 export default function MessagesPage() {
@@ -33,14 +44,16 @@ export default function MessagesPage() {
   const [selectedRoom, setSelectedRoom] = useState<ChatRoom | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [newMessage, setNewMessage] = useState('');
-  const [searchResults, setSearchResults] = useState<any[]>([]);
+  const [searchResults, setSearchResults] = useState<LocalSearchUser[]>([]);
   const [searching, setSearching] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
   const [filters, setFilters] = useState<Filters>({});
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
-  const [onlineUsers, setOnlineUsers] = useState<Set<string>>(new Set());
+  const [onlineUsers, setOnlineUsers] = useState<string[]>([]);
+  const [socket, setSocket] = useState<WebSocket | null>(null);
+  const [lastSeenTimes, setLastSeenTimes] = useState<Map<string, string>>(new Map());
 
   // Load messages for a specific room
   const loadMessages = useCallback(async (roomId: string, pageNum = 1, append = false) => {
@@ -123,7 +136,13 @@ export default function MessagesPage() {
     setSearching(true);
     try {
       const response = await userApi.searchUsers(query);
-      setSearchResults(response.data || []);
+      if (response.success && response.data) {
+        const formattedResults = response.data.map(user => ({
+          ...user,
+          avatar_url: user.avatar_url || null
+        })) as LocalSearchUser[];
+        setSearchResults(formattedResults);
+      }
     } catch (error) {
       console.error('Search error:', error);
       toast.error('Failed to search users');
@@ -158,7 +177,7 @@ export default function MessagesPage() {
     return `${wsBaseUrl}/ws/chat/${selectedRoom.id}/?token=${token}`;
   }, [wsBaseUrl, selectedRoom]);
 
-  const { sendMessage, isConnected } = useWebSocket({
+  const { sendMessage, isConnected, socket: wsSocket } = useWebSocket({
     url: wsUrl,
     onMessage: useCallback((data: WebSocketMessage) => {
       console.log('WebSocket message received:', data);
@@ -167,7 +186,11 @@ export default function MessagesPage() {
         const newMessage: Message = {
           id: data.message.id,
           content: data.message.content,
-          sender: data.message.sender.id,
+          sender: {
+            id: data.message.sender.id,
+            username: data.message.sender.username,
+            avatar_url: data.message.sender.avatar_url
+          },
           created_at: data.message.created_at,
           is_read: data.message.is_read,
           read_at: null,
@@ -207,17 +230,31 @@ export default function MessagesPage() {
           });
         }
       } 
-      else if (data.type === 'user_status') {
-        // Only update online status if it's for the other participant and user_id exists
-        if (selectedRoom && data.user_id && data.user_id === selectedRoom.other_participant.id) {
+      else if (data.type === 'user_status' && data.user_status) {
+        const userId = data.user_status.user_id;
+        const status = data.user_status.status;
+        
+        // Only update if we have a selected room and this status is for the other participant
+        if (selectedRoom && userId === selectedRoom.other_participant.id) {
+          console.log(`Updating status for other participant: ${userId} to ${status}`);
+          
           setOnlineUsers(prev => {
-            const newSet = new Set(prev);
-            if (data.status === 'online') {
-              newSet.add(data.user_id!);  // TypeScript now knows user_id exists
+            if (status === 'online') {
+              if (!prev.includes(userId)) {
+                console.log('Adding user to online users');
+                return [...prev, userId];
+              }
             } else {
-              newSet.delete(data.user_id!);
+              console.log('Removing user from online users');
+              // Update last seen time when user goes offline
+              setLastSeenTimes(prev => {
+                const newMap = new Map(prev);
+                newMap.set(userId, new Date().toISOString());
+                return newMap;
+              });
+              return prev.filter(id => id !== userId);
             }
-            return newSet;
+            return prev;
           });
         }
       }
@@ -230,6 +267,13 @@ export default function MessagesPage() {
       }
     }, [selectedRoom, loadMessages]),
   });
+
+  // Update socket reference when WebSocket connection changes
+  useEffect(() => {
+    if (wsSocket) {
+      setSocket(wsSocket);
+    }
+  }, [wsSocket]);
 
   // Then define handleSendMessage using the sendMessage function
   const handleSendMessage = useCallback(() => {
@@ -348,8 +392,8 @@ export default function MessagesPage() {
           <ChatArea
             room={selectedRoom}
             messages={messages}
-            isOnline={onlineUsers.has(selectedRoom.other_participant.id)}
-            lastSeen={selectedRoom.other_participant.last_seen ?? null}
+            isOnline={onlineUsers.includes(selectedRoom.other_participant.id)}
+            lastSeen={lastSeenTimes.get(selectedRoom.other_participant.id) || null}
             isConnected={isConnected}
             onBack={() => {
               setSelectedRoom(null);
@@ -360,6 +404,7 @@ export default function MessagesPage() {
             onSendMessage={handleSendMessage}
             onScroll={handleScroll}
             loadingMore={loadingMore}
+            socket={socket}
           />
         ) : (
           <div className="hidden md:flex flex-1 items-center justify-center">
@@ -381,7 +426,7 @@ export default function MessagesPage() {
           if (selectedRoom) {
             const response = await chatApi.filterMessages(selectedRoom.id, filters);
             if (response.success) {
-              setMessages(response.data);
+              setMessages(response.data || []);
               setShowFilters(false);
             }
           }
@@ -396,4 +441,4 @@ export default function MessagesPage() {
       />
     </div>
   );
-} 
+}

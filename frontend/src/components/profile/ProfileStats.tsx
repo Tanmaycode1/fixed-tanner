@@ -1,6 +1,6 @@
 "use client";
 
-import { cn } from "@/lib/utils";
+
 
 interface ProfileStatsProps {
   postCount: number;

@@ -11,16 +11,14 @@ import {
   User, 
   PlusSquare, 
   Home,
-  Moon,
-  Sun,
   Settings,
   Bell
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { userApi, authApi, getFullImageUrl } from '@/services/api';
 import { toast } from 'react-hot-toast';
-import { useTheme } from '@/context/ThemeContext';
 import { User as UserType } from '@/types/user';
+import { default as NextImage } from 'next/image';
 
 const menuItems = [
   { 
@@ -64,7 +62,6 @@ const menuItems = [
 export function Sidebar({ currentUser }: { currentUser: UserType | null }) {
   const router = useRouter();
   const pathname = usePathname();
-  const { theme, toggleTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
 
   useEffect(() => {
@@ -160,13 +157,17 @@ export function Sidebar({ currentUser }: { currentUser: UserType | null }) {
             <Link href="/profile">
               <div className="flex items-center space-x-3 p-2 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors group">
                 <div className="relative">
-                  <div className="h-10 w-10 rounded-full flex items-center justify-center overflow-hidden ring-2 ring-offset-2 ring-transparent group-hover:ring-primary-500/20 dark:ring-offset-gray-900 transition-all">
+                  <div className="h-10 w-10 rounded-full overflow-hidden ring-2 ring-offset-2 ring-transparent group-hover:ring-primary-500/20 dark:ring-offset-gray-900 transition-all">
                     {currentUser.avatar_url ? (
-                      <img
-                        src={getFullImageUrl(currentUser.avatar_url)}
-                        alt={`${currentUser.first_name} ${currentUser.last_name}`}
-                        className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-110"
-                      />
+                      <div className="relative h-full w-full">
+                        <NextImage
+                          src={getFullImageUrl(currentUser.avatar_url)}
+                          alt={`${currentUser.first_name} ${currentUser.last_name}`}
+                          fill
+                          className="object-cover rounded-full transition-transform duration-300 group-hover:scale-110"
+                          sizes="40px"
+                        />
+                      </div>
                     ) : (
                       <div className="h-full w-full flex items-center justify-center bg-gray-100 dark:bg-gray-800">
                         <User className="h-5 w-5 text-gray-400" />
@@ -188,18 +189,18 @@ export function Sidebar({ currentUser }: { currentUser: UserType | null }) {
 
           {/* Action Buttons */}
           <div className="grid grid-cols-3 gap-2">
-            <Button
+            {/* <Button
               variant="ghost"
               size="icon"
               onClick={toggleTheme}
               className="rounded-xl hover:bg-gray-100 dark:hover:bg-gray-800"
             >
-              {/* {theme === 'dark' ? (
+              {theme === 'dark' ? (
                 <Sun className="h-5 w-5 text-amber-500" />
               ) : (
                 <Moon className="h-5 w-5 text-blue-500" />
-              )} */}
-            </Button>
+              )}
+            </Button> */}
             <Button
               variant="ghost"
               size="icon"

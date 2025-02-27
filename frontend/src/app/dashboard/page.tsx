@@ -1,17 +1,12 @@
 "use client";
 
-import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'react-hot-toast';
-import { useTheme } from '@/context/ThemeContext';
-import { userApi, authApi, getFullImageUrl } from '@/services/api';
-import { Sun, Moon } from 'lucide-react';
+import { userApi} from '@/services/api';
 import Link from 'next/link';
-import Image from 'next/image';
 import { Button } from '@/components/ui/button';
 import { User } from 'lucide-react';
-import { FollowButton } from '@/components/ui/follow-button';
 import { postsApi, type Post } from '@/services/postsApi';
 
 // Components
@@ -23,14 +18,23 @@ import { CaughtUpAnimation } from '@/components/dashboard/CaughtUpAnimation';
 import { Loader } from 'lucide-react';
 
 // Mock Data
-import { mockPosts, trendingTopics, suggestedUsers } from '@/data/mockData';
+import { trendingTopics } from '@/data/mockData';
+
+// Add these interfaces at the top of the file, after the imports
+interface SuggestedUser {
+  id: string | number;
+  username: string;
+  email: string;
+  first_name?: string;
+  last_name?: string;
+  avatar?: string;
+  bio?: string;
+}
 
 export default function DashboardPage() {
-  const router = useRouter();
-  const { theme, toggleTheme } = useTheme();
   const [loading, setLoading] = useState(true);
   const [currentUser, setCurrentUser] = useState(null);
-  const [suggestions, setSuggestions] = useState<any[]>([]);
+  const [suggestions, setSuggestions] = useState<SuggestedUser[]>([]);
   const [loadingSuggestions, setLoadingSuggestions] = useState(true);
   const [posts, setPosts] = useState<Post[]>([]);
   const [isLoadingPosts, setIsLoadingPosts] = useState(true);
@@ -134,7 +138,7 @@ export default function DashboardPage() {
       <div className="flex">
         {/* Desktop Sidebar */}
         <div className="hidden lg:block lg:w-64 fixed inset-y-0">
-          <Sidebar />
+          <Sidebar currentUser={currentUser} />
         </div>
 
         {/* Mobile Header - Fixed at top */}
@@ -144,7 +148,7 @@ export default function DashboardPage() {
               <span className="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-primary-600 to-primary-400">
                 Neuhu
               </span>
-              <button
+              {/* <button
                 onClick={toggleTheme}
                 className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
               >
@@ -153,7 +157,7 @@ export default function DashboardPage() {
                 ) : (
                   <Moon className="h-5 w-5 text-gray-600 dark:text-gray-400" />
                 )}
-              </button>
+              </button> */}
             </div>
           </div>
         </div>
@@ -311,12 +315,12 @@ export default function DashboardPage() {
                         </div>
                       ) : (
                         <div className="divide-y divide-gray-200 dark:divide-gray-700">
-                          {suggestions.map((user) => (
+                          {suggestions.map((user, index) => (
                             <motion.div
                               key={user.id}
                               initial={{ opacity: 0, y: 10 }}
                               animate={{ opacity: 1, y: 0 }}
-                              transition={{ delay: user.id * 0.1 }}
+                              transition={{ delay: index * 0.1 }}
                               className="flex items-center gap-3 p-4 hover:bg-gray-50 dark:hover:bg-gray-800/50"
                             >
                               <Link href={`/profile/${user.id}`} className="shrink-0">

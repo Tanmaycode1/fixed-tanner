@@ -1,39 +1,17 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useRouter } from 'next/navigation';
 import {
-  Play,
-  Pause,
-  SkipBack,
-  SkipForward,
-  Volume2,
-  VolumeX,
-  Repeat,
-  Shuffle,
   MoreHorizontal,
-  Disc3,
-  ListMusic,
   Heart,
   MessageCircle,
   Share2,
   Bookmark,
-  Link2,
   Flag,
   Loader2,
-  Eye,
-  MessageSquare,
-  Send,
-  ChevronUp,
-  Camera,
-  Paperclip,
-  Clock,
   Copy,
-  Forward,
-  Rewind,
   Trash2,
   Edit2,
-  MoreVertical,
-  ThumbsUp
 } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -48,9 +26,6 @@ import {
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
 } from "@/components/ui/dialog";
 import { toast } from 'react-hot-toast';
 import { cn } from "@/lib/utils";
@@ -112,8 +87,6 @@ export function PostCard({ post, onPostUpdate, isLandingPage = false }: PostCard
   const router = useRouter();
   const [isLoading, setIsLoading] = useState(false);
   const [showComments, setShowComments] = useState(false);
-  const [imageLoading, setImageLoading] = useState(true);
-  const [imageError, setImageError] = useState(false);
   const [comments, setComments] = useState<Comment[]>([]);
   const [localPost, setLocalPost] = useState(post);
   const [showImageModal, setShowImageModal] = useState(false);
@@ -121,8 +94,6 @@ export function PostCard({ post, onPostUpdate, isLandingPage = false }: PostCard
   const [newComment, setNewComment] = useState('');
   const [isSubmittingComment, setIsSubmittingComment] = useState(false);
   const [isLoadingComments, setIsLoadingComments] = useState(false);
-  const [commentsPage, setCommentsPage] = useState(1);
-  const [hasMoreComments, setHasMoreComments] = useState(true);
   const [currentUser, setCurrentUser] = useState<{
     id: string;
     username: string;
@@ -131,6 +102,26 @@ export function PostCard({ post, onPostUpdate, isLandingPage = false }: PostCard
   } | null>(null);
   const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
   const [editedContent, setEditedContent] = useState('');
+
+  const loadComments = useCallback(async () => {
+    try {
+      setIsLoadingComments(true);
+      const result = await postsApi.getComments(localPost.id);
+      if (result.success && result.data) {
+        setComments(result.data as Comment[]);
+      }
+    } catch (error) {
+      console.error('Error loading comments:', error);
+    } finally {
+      setIsLoadingComments(false);
+    }
+  }, [localPost.id]);
+
+  useEffect(() => {
+    if (showComments && comments.length === 0) {
+      loadComments();
+    }
+  }, [showComments, comments.length, loadComments]);
 
   useEffect(() => {
     setLocalPost(post);
@@ -276,7 +267,7 @@ export function PostCard({ post, onPostUpdate, isLandingPage = false }: PostCard
         setIsLoadingComments(true);
         const result = await postsApi.getComments(localPost.id);
         if (result.success && result.data) {
-          setComments(result.data);
+          setComments(result.data as Comment[]);
         } else {
           toast.error('Failed to load comments');
         }
@@ -288,26 +279,6 @@ export function PostCard({ post, onPostUpdate, isLandingPage = false }: PostCard
       }
     }
   };
-
-  // Add useEffect to load comments when the component mounts if comments are shown
-  useEffect(() => {
-    if (showComments && comments.length === 0) {
-      const loadComments = async () => {
-        try {
-          setIsLoadingComments(true);
-          const result = await postsApi.getComments(localPost.id);
-          if (result.success && result.data) {
-            setComments(result.data);
-          }
-        } catch (error) {
-          console.error('Error loading comments:', error);
-        } finally {
-          setIsLoadingComments(false);
-        }
-      };
-      loadComments();
-    }
-  }, [showComments, localPost.id]);
 
   const handleSubmitComment = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -329,7 +300,7 @@ export function PostCard({ post, onPostUpdate, isLandingPage = false }: PostCard
       
       if (result.success && result.data) {
         // Add the new comment to the beginning of the list
-        setComments(prev => [result.data, ...prev]);
+        setComments(prev => [result.data as Comment, ...prev]);
         setNewComment('');
         
         // Update post comment count

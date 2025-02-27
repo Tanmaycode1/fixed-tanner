@@ -1,5 +1,3 @@
-import Image from 'next/image';
-
 export function PlaceholderImage() {
   return (
     <div className="relative w-full h-full bg-muted flex items-center justify-center">

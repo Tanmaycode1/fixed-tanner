@@ -1,14 +1,12 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from 'react';
-import { motion, useScroll, useTransform, useSpring, useMotionValue } from 'framer-motion';
-import { useRouter } from 'next/navigation';
+import { motion, useScroll, useTransform} from 'framer-motion';
 import Layout from '@/components/Layout';
-import { PostCard } from '@/components/posts/PostCard';
-import { mockPosts, trendingTopics } from '@/data/mockData';
+import { trendingTopics } from '@/data/mockData';
 import { 
   BookOpen, ChevronDown, TrendingUp, 
-  ArrowRight, Sparkles, Globe
+  ArrowRight, Sparkles
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -62,29 +60,9 @@ const ParticleBackground = () => {
   );
 };
 
-const GlowingButton = ({ children, onClick, className = "" }: { children: React.ReactNode; onClick: () => void; className?: string }) => {
-  return (
-    <motion.button
-      onClick={onClick}
-      className={`relative overflow-hidden ${className}`}
-      whileHover={{ scale: 1.02 }}
-      whileTap={{ scale: 0.98 }}
-    >
-      <motion.div 
-        className="absolute inset-0 bg-gradient-to-r from-[#38BDF8]/20 to-[#0EA5E9]/20"
-        initial={{ x: "-100%" }}
-        whileHover={{ x: "100%" }}
-        transition={{ duration: 0.6, ease: "easeInOut" }}
-      />
-      {children}
-    </motion.button>
-  );
-};
 
 export default function Home() {
-  const router = useRouter();
   const [hoveredTopic, setHoveredTopic] = useState<string | null>(null);
-  const [isScrolling, setIsScrolling] = useState(false);
   const { scrollYProgress } = useScroll();
   const mainRef = useRef(null);
   const [trendingPosts, setTrendingPosts] = useState<Post[]>([]);

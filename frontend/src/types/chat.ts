@@ -4,7 +4,11 @@ import { User } from './user';
 export interface Message {
   id: string;
   content: string;
-  sender: string;
+  sender: {
+    id: string;
+    username: string;
+    avatar_url?: string | null;
+  };
   created_at: string;
   is_read: boolean;
   read_at: string | null;

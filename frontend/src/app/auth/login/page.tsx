@@ -6,14 +6,13 @@ import { AuthForm } from '@/components/auth/AuthForm';
 import { AuthLayout } from '@/components/auth/AuthLayout';
 import { authApi } from '@/services/api';
 import type { LoginCredentials } from '@/types/auth';
-import type { AuthResponse } from '@/types/auth';
 import { ApiError } from '@/services/api';
 import { toast } from 'react-hot-toast';
 
 export default function Login() {
   const router = useRouter();
   const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState('');
+  const [,setError] = useState('');
 
   const handleLogin = async (data: LoginCredentials) => {
     setIsLoading(true);
@@ -28,7 +27,7 @@ export default function Login() {
       } else {
         setError('Login failed. Please try again.');
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       if (error instanceof ApiError) {
         setError(error.userMessage);
         toast.error(error.userMessage);

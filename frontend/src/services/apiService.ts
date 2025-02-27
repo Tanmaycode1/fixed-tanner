@@ -1,4 +1,4 @@
-import axios, { AxiosResponse, AxiosError } from 'axios';
+import axios, { AxiosResponse, AxiosError, AxiosRequestConfig } from 'axios';
 import { ChatRoom, Message } from '@/types/chat';
 import { User, SearchUser } from '@/types/user';
 
@@ -26,11 +26,16 @@ apiClient.interceptors.request.use((config) => {
     return config;
 });
 
+// Add this interface for the config type
+interface RetryConfig extends AxiosRequestConfig {
+    _retry?: boolean;
+}
+
 // Simplified interceptor without queue
 apiClient.interceptors.response.use(
     (response) => response,
     async (error: AxiosError) => {
-        const originalRequest: any = error.config;
+        const originalRequest = error.config as RetryConfig;
 
         // Only try refresh once
         if (error.response?.status === 401 && !originalRequest._retry) {
@@ -48,6 +53,9 @@ apiClient.interceptors.response.use(
 
                 if (response.data.access) {
                     localStorage.setItem('token', response.data.access);
+                    if (!originalRequest.headers) {
+                        originalRequest.headers = {};
+                    }
                     originalRequest.headers.Authorization = `Bearer ${response.data.access}`;
                     return apiClient(originalRequest);
                 }

@@ -4,7 +4,6 @@ import { useParams, useRouter } from 'next/navigation';
 import { PostCard } from '@/components/posts/PostCard';
 import { Button } from '@/components/ui/button';
 import { ArrowLeft, Loader2 } from 'lucide-react';
-import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { postsApi, Post } from '@/services/postsApi';
 import { toast } from 'react-hot-toast';

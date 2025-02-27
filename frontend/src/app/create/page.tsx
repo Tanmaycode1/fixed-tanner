@@ -16,9 +16,7 @@ import {
   Newspaper,
   Loader2,
   StopCircle,
-  Trash,
-  Image as ImageIcon,
-  ChevronLeft,
+  Trash
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/Input';
@@ -28,6 +26,7 @@ import { AudioPlayer } from '@/components/AudioPlayer';
 import { postsApi } from '@/services/postsApi';
 import { cn } from '@/lib/utils';
 import Webcam from 'react-webcam';
+import { default as NextImage } from 'next/image';
 
 export default function CreatePostPage() {
   const router = useRouter();
@@ -368,11 +367,15 @@ export default function CreatePostPage() {
             <div className="mt-2">
               {imagePreview ? (
                 <div className="relative rounded-lg overflow-hidden bg-gray-100 dark:bg-gray-900">
-                  <img
-                    src={imagePreview}
-                    alt="Preview"
-                    className="w-full h-48 object-cover"
-                  />
+                  <div className="relative w-full h-48">
+                    <NextImage
+                      src={imagePreview}
+                      alt="Preview"
+                      fill
+                      className="object-cover"
+                      sizes="(max-width: 768px) 100vw, 50vw"
+                    />
+                  </div>
                   <div className="absolute top-2 right-2 flex gap-2">
                     <Button
                       variant="destructive"

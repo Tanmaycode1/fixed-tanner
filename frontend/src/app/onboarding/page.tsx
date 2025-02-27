@@ -8,7 +8,6 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useRouter } from 'next/navigation';
 import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/button';
-import { Select } from '@/components/ui/select';
 import { userApi } from '@/services/api';
 import { toast } from 'react-hot-toast';
 import { Camera, X, Loader2, User } from 'lucide-react';
@@ -16,6 +15,7 @@ import Webcam from 'react-webcam';
 import Cropper from 'react-easy-crop';
 import type { Area, Point } from 'react-easy-crop';
 import { getCroppedImg } from '@/lib/imageUtils';
+import { default as NextImage } from 'next/image';
 
 const onboardingSchema = z.object({
   phone: z.string().min(1, 'Phone number is required'),
@@ -154,7 +154,15 @@ export default function OnboardingPage() {
               <div className="relative">
                 <div className="w-32 h-32 rounded-full overflow-hidden bg-gradient-to-br from-gray-100 to-gray-50 dark:from-gray-700 dark:to-gray-800 ring-4 ring-white dark:ring-gray-800">
                   {previewImage ? (
-                    <img src={previewImage} alt="Preview" className="w-full h-full object-cover" />
+                    <div className="relative w-full h-full">
+                      <NextImage
+                        src={previewImage}
+                        alt="Preview"
+                        fill
+                        className="object-cover"
+                        sizes="(max-width: 768px) 100vw, 33vw"
+                      />
+                    </div>
                   ) : (
                     <div className="w-full h-full flex items-center justify-center">
                       <User className="w-12 h-12 text-gray-400" />

@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { FollowButton } from '@/components/ui/follow-button';
 import { Button } from '@/components/ui/button';
 import { toast } from 'react-hot-toast';
+import { default as NextImage } from 'next/image';
 
 interface User {
   id: string;
@@ -35,7 +36,6 @@ export function FollowModal({
   users,
   loading,
   onFollowChange,
-  currentUserFollowing = []
 }: FollowModalProps) {
 
   const handleFollowChange = async () => {
@@ -113,11 +113,15 @@ export function FollowModal({
                   >
                     <Link href={`/profile/${user.id}`} className="shrink-0">
                       {user.avatar ? (
-                        <img
-                          src={user.avatar}
-                          alt={user.username}
-                          className="h-12 w-12 rounded-full object-cover"
-                        />
+                        <div className="relative h-12 w-12">
+                          <NextImage
+                            src={user.avatar}
+                            alt={user.username}
+                            fill
+                            className="rounded-full object-cover"
+                            sizes="48px"
+                          />
+                        </div>
                       ) : (
                         <div className="h-12 w-12 rounded-full bg-primary/10 flex items-center justify-center">
                           <User className="h-6 w-6 text-primary" />

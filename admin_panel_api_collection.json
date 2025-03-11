@@ -1,0 +1,309 @@
+{
+	"info": {
+		"_postman_id": "unique-id",
+		"name": "Admin Panel APIs",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"item": [
+		{
+			"name": "Validate API Key",
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "X-API-Key",
+						"value": "neuhu-admin-panel-2024-secure-key-xyz",
+						"type": "text"
+					}
+				],
+				"url": {
+					"raw": "{{base_url}}/api/admin-panel/validate-key/",
+					"host": ["{{base_url}}"],
+					"path": ["api", "admin-panel", "validate-key"]
+				}
+			}
+		},
+		{
+			"name": "Dashboard Statistics",
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "X-API-Key",
+						"value": "neuhu-admin-panel-2024-secure-key-xyz",
+						"type": "text"
+					}
+				],
+				"url": {
+					"raw": "{{base_url}}/api/admin-panel/dashboard-stats/",
+					"host": ["{{base_url}}"],
+					"path": ["api", "admin-panel", "dashboard-stats"]
+				}
+			}
+		},
+		{
+			"name": "Live Logs",
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "X-API-Key",
+						"value": "neuhu-admin-panel-2024-secure-key-xyz",
+						"type": "text"
+					}
+				],
+				"url": {
+					"raw": "{{base_url}}/api/admin-panel/live-logs/?level=INFO&type=AUTH",
+					"host": ["{{base_url}}"],
+					"path": ["api", "admin-panel", "live-logs"],
+					"query": [
+						{
+							"key": "level",
+							"value": "INFO"
+						},
+						{
+							"key": "type",
+							"value": "AUTH"
+						}
+					]
+				}
+			}
+		},
+		{
+			"name": "Bulk Register Users",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "X-API-Key",
+						"value": "neuhu-admin-panel-2024-secure-key-xyz",
+						"type": "text"
+					},
+					{
+						"key": "Content-Type",
+						"value": "application/json",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"csv_file\": \"base64_encoded_csv_content\"\n}"
+				},
+				"url": {
+					"raw": "{{base_url}}/api/admin-panel/bulk-register-users/",
+					"host": ["{{base_url}}"],
+					"path": ["api", "admin-panel", "bulk-register-users"]
+				}
+			}
+		},
+		{
+			"name": "Bulk Register Progress",
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "X-API-Key",
+						"value": "neuhu-admin-panel-2024-secure-key-xyz",
+						"type": "text"
+					}
+				],
+				"url": {
+					"raw": "{{base_url}}/api/admin-panel/bulk-register-progress/?task_id={{task_id}}",
+					"host": ["{{base_url}}"],
+					"path": ["api", "admin-panel", "bulk-register-progress"],
+					"query": [
+						{
+							"key": "task_id",
+							"value": "{{task_id}}"
+						}
+					]
+				}
+			}
+		},
+		{
+			"name": "Get User Details",
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "X-API-Key",
+						"value": "neuhu-admin-panel-2024-secure-key-xyz",
+						"type": "text"
+					}
+				],
+				"url": {
+					"raw": "{{base_url}}/api/admin-panel/{{user_id}}/user-details/",
+					"host": ["{{base_url}}"],
+					"path": ["api", "admin-panel", "{{user_id}}", "user-details"]
+				}
+			}
+		},
+		{
+			"name": "Update User",
+			"request": {
+				"method": "PUT",
+				"header": [
+					{
+						"key": "X-API-Key",
+						"value": "neuhu-admin-panel-2024-secure-key-xyz",
+						"type": "text"
+					},
+					{
+						"key": "Content-Type",
+						"value": "application/json",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"email\": \"user@example.com\",\n    \"username\": \"username\",\n    \"first_name\": \"First\",\n    \"last_name\": \"Last\",\n    \"bio\": \"User bio\",\n    \"is_active\": true,\n    \"is_staff\": false,\n    \"is_superuser\": false,\n    \"account_privacy\": \"PUBLIC\",\n    \"social_links\": {},\n    \"notification_preferences\": {}\n}"
+				},
+				"url": {
+					"raw": "{{base_url}}/api/admin-panel/{{user_id}}/update-user/",
+					"host": ["{{base_url}}"],
+					"path": ["api", "admin-panel", "{{user_id}}", "update-user"]
+				}
+			}
+		},
+		{
+			"name": "Update User Avatar",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "X-API-Key",
+						"value": "neuhu-admin-panel-2024-secure-key-xyz",
+						"type": "text"
+					},
+					{
+						"key": "Content-Type",
+						"value": "application/json",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"avatar\": \"base64_encoded_image\",\n    \"file_name\": \"image.jpg\"\n}"
+				},
+				"url": {
+					"raw": "{{base_url}}/api/admin-panel/{{user_id}}/update-avatar/",
+					"host": ["{{base_url}}"],
+					"path": ["api", "admin-panel", "{{user_id}}", "update-avatar"]
+				}
+			}
+		},
+		{
+			"name": "Remove User Avatar",
+			"request": {
+				"method": "DELETE",
+				"header": [
+					{
+						"key": "X-API-Key",
+						"value": "neuhu-admin-panel-2024-secure-key-xyz",
+						"type": "text"
+					}
+				],
+				"url": {
+					"raw": "{{base_url}}/api/admin-panel/{{user_id}}/remove-avatar/",
+					"host": ["{{base_url}}"],
+					"path": ["api", "admin-panel", "{{user_id}}", "remove-avatar"]
+				}
+			}
+		},
+		{
+			"name": "Delete User",
+			"request": {
+				"method": "DELETE",
+				"header": [
+					{
+						"key": "X-API-Key",
+						"value": "neuhu-admin-panel-2024-secure-key-xyz",
+						"type": "text"
+					}
+				],
+				"url": {
+					"raw": "{{base_url}}/api/admin-panel/{{user_id}}/delete-user/",
+					"host": ["{{base_url}}"],
+					"path": ["api", "admin-panel", "{{user_id}}", "delete-user"]
+				}
+			}
+		},
+		{
+			"name": "List Staff",
+			"request": {
+				"method": "GET",
+				"header": [
+					{
+						"key": "X-API-Key",
+						"value": "neuhu-admin-panel-2024-secure-key-xyz",
+						"type": "text"
+					}
+				],
+				"url": {
+					"raw": "{{base_url}}/api/admin-panel/staff/",
+					"host": ["{{base_url}}"],
+					"path": ["api", "admin-panel", "staff"]
+				}
+			}
+		},
+		{
+			"name": "Assign Role",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "X-API-Key",
+						"value": "neuhu-admin-panel-2024-secure-key-xyz",
+						"type": "text"
+					},
+					{
+						"key": "Content-Type",
+						"value": "application/json",
+						"type": "text"
+					}
+				],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"role_type\": \"MODERATOR\",\n    \"permissions\": {}\n}"
+				},
+				"url": {
+					"raw": "{{base_url}}/api/admin-panel/staff/{{user_id}}/assign-role/",
+					"host": ["{{base_url}}"],
+					"path": ["api", "admin-panel", "staff", "{{user_id}}", "assign-role"]
+				}
+			}
+		},
+		{
+			"name": "Remove Role",
+			"request": {
+				"method": "POST",
+				"header": [
+					{
+						"key": "X-API-Key",
+						"value": "neuhu-admin-panel-2024-secure-key-xyz",
+						"type": "text"
+					}
+				],
+				"url": {
+					"raw": "{{base_url}}/api/admin-panel/staff/{{user_id}}/remove-role/",
+					"host": ["{{base_url}}"],
+					"path": ["api", "admin-panel", "staff", "{{user_id}}", "remove-role"]
+				}
+			}
+		}
+	],
+	"variable": [
+		{
+			"key": "base_url",
+			"value": "http://localhost:8000"
+		},
+		{
+			"key": "user_id",
+			"value": "replace_with_user_id"
+		},
+		{
+			"key": "task_id",
+			"value": "replace_with_task_id"
+		}
+	]
+} 

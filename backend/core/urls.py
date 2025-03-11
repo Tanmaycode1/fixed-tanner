@@ -27,6 +27,8 @@ api_urlpatterns = [
     path('posts/', include('posts.urls')),
     path('chat/', include('chat.urls')),  # Note: 'chat.urls', not 'chat:urls'
     path('search/', include('search.urls')),
+    path('admin-panel/', include('admin_panel.urls')),  # Added admin panel URLs
+    path('system-logs/', include('system_logs.urls')),  # Added system logs URLs
 ]
 
 def health_check(request):

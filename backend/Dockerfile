@@ -25,11 +25,11 @@ COPY requirements.txt .
 RUN pip install --upgrade pip && \
     pip install wheel && \
     pip install --no-cache-dir -r requirements.txt && \
-    pip install channels==3.0.5 channels-redis==3.4.1 daphne==3.0.2
+    pip install channels==3.0.5 channels-redis==3.4.1 daphne==3.0.2 watchdog[watchmedo]
 
 # Copy scripts
-COPY entrypoint.sh run-dev.sh ./
-RUN chmod +x entrypoint.sh run-dev.sh
+COPY entrypoint.sh run-dev.sh run-dev-reload.sh ./
+RUN chmod +x entrypoint.sh run-dev.sh run-dev-reload.sh
 
 # Create necessary directories with proper permissions
 RUN mkdir -p /app/staticfiles/admin/js \

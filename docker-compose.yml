@@ -33,44 +33,42 @@ services:
       - app_network
 
   backend:
-    build: ./backend
-    command: daphne -b 0.0.0.0 -p 8000 core.asgi:application
-    volumes:
-      - ./backend:/app
-      - static_volume:/app/static
-      - media_volume:/app/media
-      - ./backend/core/utils:/app/core/utils
-    ports:
-      - "8000:8000"
-    environment:
-      - DJANGO_ENV=development
-      - DJANGO_SETTINGS_MODULE=core.settings.local
-      - DEBUG=True
-      - CORS_ORIGIN_ALLOW_ALL=True
-      - SECRET_KEY=your-secret-key-here
-      - ALLOWED_HOSTS=localhost,127.0.0.1,54.242.46.4,core.townhallplus.com
-      - POSTGRES_DB=dbname
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=neuhu-db1234
-      - POSTGRES_HOST=neuhu-db-1.cl2iee4myu5i.us-east-1.rds.amazonaws.com
-      - POSTGRES_PORT=5432
-      - REDIS_URL=redis://redis:6379/0
-      - CHANNEL_LAYERS_HOST=redis
-    depends_on:
-      db:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    networks:
-      - app_network
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health/"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
-  
-  
+   build: ./backend
+   command: ./run-dev-reload.sh  # Changed from direct daphne command
+   volumes:
+    - ./backend:/app
+    - static_volume:/app/static
+    - media_volume:/app/media
+    - ./backend/core/utils:/app/core/utils
+   ports:
+    - "8000:8000"
+   environment:
+    - DJANGO_ENV=development
+    - DJANGO_SETTINGS_MODULE=core.settings.local
+    - DEBUG=True
+    - CORS_ORIGIN_ALLOW_ALL=True
+    - SECRET_KEY=your-secret-key-here
+    - ALLOWED_HOSTS=localhost,127.0.0.1
+    - POSTGRES_DB=dbname
+    - POSTGRES_USER=postgres
+    - POSTGRES_PASSWORD=neuhu-db1234
+    - POSTGRES_HOST=neuhu-db-1.cl2iee4myu5i.us-east-1.rds.amazonaws.com
+    - POSTGRES_PORT=5432
+    - REDIS_URL=redis://redis:6379/0
+    - CHANNEL_LAYERS_HOST=redis
+   depends_on:
+    db:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+   networks:
+    - app_network
+   healthcheck:
+    test: ["CMD", "curl", "-f", "http://localhost:8000/health/"]
+    interval: 30s
+    timeout: 10s
+    retries: 3
+    start_period: 40s
   
   celery:
     build: ./backend
@@ -84,7 +82,7 @@ services:
       - DEBUG=True
       - CORS_ORIGIN_ALLOW_ALL=True
       - SECRET_KEY=your-secret-key-here
-      - ALLOWED_HOSTS=localhost,127.0.0.1,54.242.46.4,core.townhallplus.com
+      - ALLOWED_HOSTS=localhost,127.0.0.1
       - POSTGRES_DB=dbname
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=neuhu-db1234
@@ -112,7 +110,7 @@ services:
       - DEBUG=True
       - CORS_ORIGIN_ALLOW_ALL=True
       - SECRET_KEY=your-secret-key-here
-      - ALLOWED_HOSTS=localhost,127.0.0.1,54.242.46.4,core.townhallplus.com
+      - ALLOWED_HOSTS=localhost,127.0.0.1
       - POSTGRES_DB=dbname
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=neuhu-db1234

@@ -51,6 +51,7 @@ INSTALLED_APPS = [
     'moderation.apps.ModerationConfig',
     'api.apps.ApiConfig',
     'chat.apps.ChatConfig',
+    'system_logs.apps.SystemLogsConfig',
     'django.contrib.postgres',
 ]
 
@@ -63,6 +64,7 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    'system_logs.middleware.LoggingMiddleware',
 ]
 
 ROOT_URLCONF = 'core.urls'
@@ -182,6 +184,7 @@ for dir_path in MEDIA_SUBDIRS.values():
 # Add WebSocket allowed origins
 CSRF_TRUSTED_ORIGINS = [
     "http://localhost:3000",
+    "http://127.0.0.1:3000",
 ]
 
 # Add these settings
@@ -220,12 +223,30 @@ DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL')
 POSTGRES_SEARCH_CONFIG = 'english'  # or your preferred language 
 
 # CORS settings
-CORS_ALLOW_ALL_ORIGINS = True  # For development only
+CORS_ALLOW_ALL_ORIGINS = True
 CORS_ALLOW_CREDENTIALS = True
-CORS_ALLOWED_ORIGINS = [
-    "http://localhost:3000",
-    # Add other origins as needed
+CORS_ALLOW_METHODS = [
+    'DELETE',
+    'GET',
+    'OPTIONS',
+    'PATCH',
+    'POST',
+    'PUT',
 ]
+CORS_ALLOW_HEADERS = [
+    'accept',
+    'accept-encoding',
+    'authorization',
+    'content-type',
+    'dnt',
+    'origin',
+    'user-agent',
+    'x-csrftoken',
+    'x-requested-with',
+    'x-api-key',
+]
+CORS_EXPOSE_HEADERS = ['x-api-key']
+CORS_PREFLIGHT_MAX_AGE = 86400  # 24 hours
 
 # Add websocket to allowed hosts
 ALLOWED_HOSTS = ['*']  # For development only 

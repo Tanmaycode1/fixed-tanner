@@ -29,11 +29,32 @@ MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 # For development, allow all hosts to access media files
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:3000",  # React development server
+    "http://192.168.29.144:3000",  # Your local IP
     "https://your-production-frontend.com"
 ]
 
 CORS_ALLOW_CREDENTIALS = True
-CORS_ALLOW_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS']
+CORS_ALLOW_METHODS = [
+    'GET',
+    'POST',
+    'PUT',
+    'PATCH',
+    'DELETE',
+    'OPTIONS'
+]
+
+CORS_ALLOW_HEADERS = [
+    'accept',
+    'accept-encoding',
+    'authorization',
+    'content-type',
+    'dnt',
+    'origin',
+    'user-agent',
+    'x-csrftoken',
+    'x-requested-with',
+    'x-api-key',  # Add this for your API key header
+]
 
 # For development, serve media files
 if DEBUG:
@@ -53,7 +74,13 @@ CHANNEL_LAYERS = {
 }
 
 INSTALLED_APPS = [
-    # ... other apps ...
+    'django.contrib.admin',
+    'django.contrib.auth',
+    'django.contrib.contenttypes',
+    'django.contrib.sessions',
+    'django.contrib.messages',
+    'django.contrib.staticfiles',
+    'system_logs',  # Changed from 'logging'
     'chat.apps.ChatConfig',
 ]
 
@@ -69,4 +96,16 @@ SIMPLE_JWT = {
     'ROTATE_REFRESH_TOKENS': True,
     'BLACKLIST_AFTER_ROTATION': True,
     'AUTH_HEADER_TYPES': ('Bearer',),
-} 
+}
+
+MIDDLEWARE = [
+    'django.middleware.security.SecurityMiddleware',
+    'django.contrib.sessions.middleware.SessionMiddleware',
+    'corsheaders.middleware.CorsMiddleware',
+    'django.middleware.common.CommonMiddleware',
+    'django.middleware.csrf.CsrfViewMiddleware',
+    'django.contrib.auth.middleware.AuthenticationMiddleware',
+    'django.contrib.messages.middleware.MessageMiddleware',
+    'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    'system_logs.middleware.LoggingMiddleware',  # Changed from 'logging.middleware.LoggingMiddleware'
+] 

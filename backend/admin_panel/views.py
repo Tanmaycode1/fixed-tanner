@@ -10,12 +10,14 @@ from moderation.models import Report
 from .serializers import (
     SystemLogSerializer, UserRoleSerializer, 
     ModeratorActionSerializer, AdminUserSerializer,
-    BulkUploadTaskSerializer, BulkUploadTaskUserSerializer,
+    BulkUploadTaskSerializer, BulkUploadUserSerializer,
     AdminPostSerializer
 )
 from .permissions import IsSuperuserOrAdmin, IsModeratorOrAbove, APIKeyPermission
 from django.db.models import Q, Count
-from django.db.models.functions import TruncDay
+from django.db.models.functions import TruncDay, Greatest
+from django.contrib.postgres.search import TrigramSimilarity
+from django.db.models import Case, When, Value, F
 from django.utils import timezone
 from datetime import timedelta
 from drf_yasg.utils import swagger_auto_schema
@@ -31,11 +33,12 @@ import uuid
 from django.core.files.base import ContentFile
 from rest_framework.viewsets import GenericViewSet
 from rest_framework.pagination import PageNumberPagination
-from .models import BulkUploadTask, BulkUploadTaskUser
+from .models import BulkUploadTask, BulkUploadUser
 import logging
 from django.http import HttpResponse
 from celery import shared_task
 from core.celery import app as celery_app
+import threading
 
 # Set up logger
 logger = logging.getLogger(__name__)
@@ -239,7 +242,7 @@ class AdminPanelViewSet(GenericViewSet):
             task = BulkUploadTask.objects.get(id=task_id)
             
             # Get all task users
-            task_users = BulkUploadTaskUser.objects.filter(task=task)
+            task_users = BulkUploadUser.objects.filter(task=task)
             
             # Get all user IDs
             user_ids = task_users.values_list('user_id', flat=True)
@@ -384,8 +387,8 @@ class AdminPanelViewSet(GenericViewSet):
             if task.status != 'COMPLETED':
                 return Response({'error': 'Task not completed yet'}, status=status.HTTP_400_BAD_REQUEST)
 
-            # Get created users from BulkUploadTaskUser model
-            task_users = BulkUploadTaskUser.objects.filter(task=task)
+            # Get created users from BulkUploadUser model
+            task_users = BulkUploadUser.objects.filter(task=task)
             created_users = [
                 {
                     'email': user.email,
@@ -622,8 +625,8 @@ class AdminPanelViewSet(GenericViewSet):
             if task.status != 'COMPLETED':
                 return Response({'error': 'Task not completed yet'}, status=status.HTTP_400_BAD_REQUEST)
 
-            # Get users from BulkUploadTaskUser model
-            task_users = BulkUploadTaskUser.objects.filter(task=task)
+            # Get users from BulkUploadUser model
+            task_users = BulkUploadUser.objects.filter(task=task)
 
             # Create CSV file
             output = io.StringIO()
@@ -657,15 +660,15 @@ class AdminPanelViewSet(GenericViewSet):
         try:
             task = BulkUploadTask.objects.get(id=task_id)
             
-            # Get users from BulkUploadTaskUser model with pagination
-            task_users = BulkUploadTaskUser.objects.select_related('user').filter(task=task).order_by('-created_at')
+            # Get users from BulkUploadUser model with pagination
+            task_users = BulkUploadUser.objects.select_related('user').filter(task=task).order_by('-created_at')
             
             # Get task info
             task_serializer = BulkUploadTaskSerializer(task)
             
             # Use pagination
             page = self.paginate_queryset(task_users)
-            serializer = BulkUploadTaskUserSerializer(page, many=True)
+            serializer = BulkUploadUserSerializer(page, many=True)
             
             # Create response data
             response_data = {
@@ -963,7 +966,7 @@ class AdminPanelViewSet(GenericViewSet):
         posts_by_day = posts.annotate(
             day=TruncDay('created_at')
         ).values('day').annotate(count=Count('id')).order_by('day')
-        
+
         # Engagement stats
         total_likes = sum(post.likes.count() for post in posts)
         total_comments = sum(post.comments.count() for post in posts)
@@ -1026,6 +1029,300 @@ class AdminPanelViewSet(GenericViewSet):
             'most_liked_posts': most_liked_posts,
             'most_commented_posts': most_commented_posts,
         })
+
+    @swagger_auto_schema(
+        methods=['get'],
+        operation_description="Search for users and posts with advanced relevance scoring",
+        manual_parameters=[
+            openapi.Parameter(
+                'q', 
+                openapi.IN_QUERY,
+                description="Search query",
+                type=openapi.TYPE_STRING,
+                required=True
+            ),
+            openapi.Parameter(
+                'type', 
+                openapi.IN_QUERY,
+                description="Type of content to search for",
+                type=openapi.TYPE_STRING,
+                enum=['all', 'users', 'posts'],
+                default='all'
+            ),
+        ],
+        responses={
+            200: openapi.Response(
+                description="Search results",
+                examples={
+                    "application/json": {
+                        "success": True,
+                        "data": {
+                            "users": [],
+                            "posts": []
+                        }
+                    }
+                }
+            )
+        }
+    )
+    @action(detail=False, methods=['get'])
+    def search(self, request):
+        """Advanced search endpoint for admin panel with API key authentication"""
+        try:
+            query = request.GET.get('q', '').strip()
+            search_type = request.GET.get('type', 'all').lower()
+
+            logger.info(f"Admin search request - query: {query}, type: {search_type}")
+
+            if not query:
+                logger.info("Empty query, returning empty results")
+                return Response({
+                    'success': True,
+                    'data': {
+                        'posts': [],
+                        'users': []
+                    }
+                })
+
+            results = {
+                'posts': [],
+                'users': []
+            }
+
+            # Get users if requested
+            if search_type in ['all', 'users']:
+                try:
+                    # Calculate similarities for user search
+                    username_similarity = TrigramSimilarity('username', query)
+                    name_similarity = Greatest(
+                        TrigramSimilarity('first_name', query),
+                        TrigramSimilarity('last_name', query)
+                    )
+                    
+                    users = User.objects.annotate(
+                        # Exact match score
+                        exact_match=Case(
+                            When(username__iexact=query, then=Value(1.0)),
+                            default=Value(0.0)
+                        ),
+                        # Contains score
+                        contains_score=Case(
+                            When(username__icontains=query, then=Value(0.6)),
+                            When(first_name__icontains=query, then=Value(0.5)),
+                            When(last_name__icontains=query, then=Value(0.5)),
+                            When(bio__icontains=query, then=Value(0.3)),
+                            When(email__icontains=query, then=Value(0.7)),  # Added email search for admin
+                            default=Value(0.0)
+                        ),
+                        # Similarity score
+                        similarity=Greatest(
+                            username_similarity * 0.4,
+                            name_similarity * 0.3
+                        ),
+                        # Final relevance score
+                        relevance=Greatest(
+                            F('exact_match'),
+                            F('contains_score'),
+                            F('similarity')
+                        )
+                    ).filter(
+                        Q(relevance__gt=0.2)  # Adjust threshold as needed
+                    ).order_by('-relevance', 'username')[:50]  # Increased limit for admin
+
+                    results['users'] = AdminUserSerializer(
+                        users,
+                        many=True,
+                        context={'request': request}
+                    ).data
+                    
+                    logger.info(f"Found {len(results['users'])} users")
+                except Exception as e:
+                    logger.error(f"Error searching users: {str(e)}", exc_info=True)
+
+            # Get posts if requested
+            if search_type in ['all', 'posts']:
+                try:
+                    # Calculate similarities for post search
+                    title_similarity = TrigramSimilarity('title', query)
+                    desc_similarity = TrigramSimilarity('description', query)
+                    
+                    posts = Post.objects.annotate(
+                        exact_match=Case(
+                            When(title__iexact=query, then=Value(1.0)),
+                            default=Value(0.0)
+                        ),
+                        contains_score=Case(
+                            When(title__icontains=query, then=Value(0.7)),
+                            When(description__icontains=query, then=Value(0.5)),
+                            default=Value(0.0)
+                        ),
+                        similarity=Greatest(
+                            title_similarity * 0.4,
+                            desc_similarity * 0.3
+                        ),
+                        relevance=Greatest(
+                            F('exact_match'),
+                            F('contains_score'),
+                            F('similarity')
+                        )
+                    ).select_related(
+                        'author'
+                    ).filter(
+                        Q(relevance__gt=0.2)
+                    ).order_by('-relevance', '-created_at')[:50]  # Increased limit for admin
+
+                    results['posts'] = AdminPostSerializer(
+                        posts,
+                        many=True,
+                        context={'request': request}
+                    ).data
+                    
+                    logger.info(f"Found {len(results['posts'])} posts")
+                except Exception as e:
+                    logger.error(f"Error searching posts: {str(e)}", exc_info=True)
+
+            return Response({
+                'success': True,
+                'data': results
+            })
+
+        except Exception as e:
+            logger.error(f"Admin search error: {str(e)}", exc_info=True)
+            return Response({
+                'success': False,
+                'message': "An error occurred while searching",
+                'data': {
+                    'posts': [],
+                    'users': []
+                }
+            }, status=500)
+
+    @swagger_auto_schema(
+        methods=['post'],
+        operation_description="Create a post for any user",
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            properties={
+                'user_id': openapi.Schema(type=openapi.TYPE_STRING, description='ID of the user to create the post for'),
+                'type': openapi.Schema(type=openapi.TYPE_STRING, enum=['NEWS', 'AUDIO'], description='Type of post'),
+                'title': openapi.Schema(type=openapi.TYPE_STRING, description='Post title'),
+                'description': openapi.Schema(type=openapi.TYPE_STRING, description='Post description'),
+                'image': openapi.Schema(type=openapi.TYPE_STRING, description='Base64 encoded image file'),
+                'audio_file': openapi.Schema(type=openapi.TYPE_STRING, description='Base64 encoded audio file (required for AUDIO posts)'),
+                'file_name': openapi.Schema(type=openapi.TYPE_STRING, description='Original file name with extension'),
+                'audio_file_name': openapi.Schema(type=openapi.TYPE_STRING, description='Original audio file name with extension')
+            },
+            required=['user_id', 'type', 'title', 'description']
+        ),
+        responses={201: AdminPostSerializer()}
+    )
+    @action(detail=False, methods=['post'])
+    def create_post(self, request):
+        """Create a post for any user"""
+        try:
+            # Get required fields
+            user_id = request.data.get('user_id')
+            post_type = request.data.get('type')
+            title = request.data.get('title')
+            description = request.data.get('description')
+            
+            # Validate required fields
+            if not user_id:
+                return Response({'error': 'user_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+            if not post_type:
+                return Response({'error': 'type is required'}, status=status.HTTP_400_BAD_REQUEST)
+            if not title:
+                return Response({'error': 'title is required'}, status=status.HTTP_400_BAD_REQUEST)
+            if not description:
+                return Response({'error': 'description is required'}, status=status.HTTP_400_BAD_REQUEST)
+            
+            # Get the user
+            User = get_user_model()
+            try:
+                user = User.objects.get(id=user_id)
+            except User.DoesNotExist:
+                return Response({'error': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
+            
+            # Create post instance
+            post = Post(
+                author=user,
+                type=post_type,
+                title=title,
+                description=description
+            )
+            
+            # Handle image upload if provided
+            image_data = request.data.get('image')
+            file_name = request.data.get('file_name')
+            
+            if image_data and file_name:
+                try:
+                    # Decode base64 image
+                    if ';base64,' in image_data:
+                        format, imgstr = image_data.split(';base64,')
+                        ext = file_name.split('.')[-1]
+                        
+                        # Generate unique filename
+                        image_file_name = f"{uuid.uuid4()}.{ext}"
+                        
+                        # Convert base64 to file
+                        data = ContentFile(base64.b64decode(imgstr))
+                        
+                        # Save image
+                        post.image.save(image_file_name, data, save=False)
+                except Exception as e:
+                    return Response(
+                        {'error': f'Error processing image: {str(e)}'},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+            
+            # Handle audio file upload for AUDIO posts
+            if post_type == 'AUDIO':
+                audio_data = request.data.get('audio_file')
+                audio_file_name = request.data.get('audio_file_name')
+                
+                if not audio_data or not audio_file_name:
+                    return Response(
+                        {'error': 'audio_file and audio_file_name are required for AUDIO posts'},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+                
+                try:
+                    # Decode base64 audio
+                    if ';base64,' in audio_data:
+                        format, audiostr = audio_data.split(';base64,')
+                        ext = audio_file_name.split('.')[-1]
+                        
+                        # Generate unique filename
+                        audio_file_name = f"{uuid.uuid4()}.{ext}"
+                        
+                        # Convert base64 to file
+                        data = ContentFile(base64.b64decode(audiostr))
+                        
+                        # Save audio file
+                        post.audio_file.save(audio_file_name, data, save=False)
+                except Exception as e:
+                    return Response(
+                        {'error': f'Error processing audio file: {str(e)}'},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+            
+            # Save the post
+            post.save()
+            
+            # Log the action
+            logger.info(f"Admin created post {post.id} for user {user.username}")
+            
+            # Return the serialized post
+            serializer = AdminPostSerializer(post, context={'request': request})
+            return Response(serializer.data, status=status.HTTP_201_CREATED)
+            
+        except Exception as e:
+            logger.error(f"Error creating post: {str(e)}")
+            return Response(
+                {'error': f'Error creating post: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
 class StaffManagementViewSet(viewsets.ModelViewSet):
     permission_classes = [APIKeyPermission]
@@ -1143,7 +1440,7 @@ def process_bulk_upload(self, task_id, csv_data):
             batch = reader[i:i + batch_size]
             batch_errors = []
             batch_users = []  # Store users to create in bulk
-            batch_task_users = []  # Store BulkUploadTaskUser objects
+            batch_task_users = []  # Store BulkUploadUser objects
             
             for row in batch:
                 try:
@@ -1182,7 +1479,7 @@ def process_bulk_upload(self, task_id, csv_data):
                     
                     batch_users.append(user)
                     batch_task_users.append(
-                        BulkUploadTaskUser(
+                        BulkUploadUser(
                             task=task,
                             email=email,
                             username=username,
@@ -1206,7 +1503,7 @@ def process_bulk_upload(self, task_id, csv_data):
                         batch_task_users[i].user = user
                     
                     # Bulk create task users
-                    BulkUploadTaskUser.objects.bulk_create(batch_task_users)
+                    BulkUploadUser.objects.bulk_create(batch_task_users)
                     
                     # Update task progress
                     task.processed_users += len(created_users)
@@ -1248,3 +1545,242 @@ def process_bulk_upload(self, task_id, csv_data):
         if self.request.retries < self.max_retries:
             logger.info(f"Retrying task {task_id}, attempt {self.request.retries + 1}")
             raise self.retry(exc=e, countdown=60 * (2 ** self.request.retries))
+
+class BulkUploadViewSet(viewsets.ViewSet):
+    """ViewSet for handling bulk user uploads"""
+    permission_classes = [APIKeyPermission]
+    
+    @swagger_auto_schema(
+        methods=['post'],
+        operation_description="Upload CSV file with user data",
+        request_body=openapi.Schema(
+            type=openapi.TYPE_OBJECT,
+            properties={
+                'csv_file': openapi.Schema(type=openapi.TYPE_STRING, description='Base64 encoded CSV file'),
+                'file_name': openapi.Schema(type=openapi.TYPE_STRING, description='Name of the file')
+            },
+            required=['csv_file', 'file_name']
+        ),
+        responses={200: BulkUploadTaskSerializer()}
+    )
+    @action(detail=False, methods=['post'])
+    def upload_users(self, request):
+        """Upload a CSV file with user data (name, username, email)"""
+        try:
+            csv_file = request.data.get('csv_file', '')
+            file_name = request.data.get('file_name', 'users.csv')
+            
+            if not csv_file:
+                return Response({'error': 'CSV file is required'}, status=status.HTTP_400_BAD_REQUEST)
+            
+            # Create a new upload task
+            task = BulkUploadTask.objects.create(
+                file_name=file_name,
+                status='WAITING'
+            )
+            
+            try:
+                # Decode the base64 CSV file
+                csv_data = base64.b64decode(csv_file).decode('utf-8')
+                
+                # Parse CSV to count rows and validate structure
+                csv_reader = csv.reader(io.StringIO(csv_data))
+                header = next(csv_reader)  # Read header
+                
+                # Validate required columns
+                required_columns = ['name', 'username', 'email']
+                if not all(col in header for col in required_columns):
+                    task.status = 'FAILED'
+                    task.save()
+                    return Response({
+                        'error': f'CSV must contain columns: {", ".join(required_columns)}'
+                    }, status=status.HTTP_400_BAD_REQUEST)
+                
+                # Count rows
+                rows = list(csv_reader)
+                task.total_rows = len(rows)
+                task.save()
+                
+                # Start processing in background
+                self._process_csv_in_background(task.id, csv_data)
+                
+                return Response(BulkUploadTaskSerializer(task).data)
+                
+            except Exception as e:
+                task.status = 'FAILED'
+                task.save()
+                return Response({'error': f'Error processing CSV: {str(e)}'}, 
+                               status=status.HTTP_400_BAD_REQUEST)
+                
+        except Exception as e:
+            return Response({'error': f'Error: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+    def _process_csv_in_background(self, task_id, csv_data):
+        """Start a background thread to process the CSV data"""
+        thread = threading.Thread(target=self._process_csv_data, args=(task_id, csv_data))
+        thread.daemon = True
+        thread.start()
+    
+    def _process_csv_data(self, task_id, csv_data):
+        """Process CSV data in a background thread"""
+        try:
+            # Get the task
+            task = BulkUploadTask.objects.get(id=task_id)
+            
+            # Check if there are any tasks in processing state
+            processing_tasks = BulkUploadTask.objects.filter(status='PROCESSING')
+            if processing_tasks.exists() and task.id != processing_tasks.first().id:
+                # Keep in waiting state, will be processed later
+                return
+            
+            # Update task status to processing
+            task.status = 'PROCESSING'
+            task.save()
+            
+            # Parse CSV
+            csv_file = io.StringIO(csv_data)
+            reader = csv.DictReader(csv_file)
+            rows = list(reader)
+            
+            # Process in batches of 20
+            batch_size = 20
+            for i in range(0, len(rows), batch_size):
+                batch = rows[i:i+batch_size]
+                
+                # Create threads for parallel processing
+                threads = []
+                for row in batch:
+                    thread = threading.Thread(
+                        target=self._process_user_row,
+                        args=(task, row)
+                    )
+                    threads.append(thread)
+                    thread.start()
+                
+                # Wait for all threads to complete
+                for thread in threads:
+                    thread.join()
+                
+                # Update processed count
+                task.processed_rows += len(batch)
+                task.save()
+            
+            # Mark task as completed
+            task.status = 'COMPLETED'
+            task.save()
+            
+            # Check if there are any waiting tasks and process the next one
+            waiting_tasks = BulkUploadTask.objects.filter(status='WAITING').order_by('created_at')
+            if waiting_tasks.exists():
+                next_task = waiting_tasks.first()
+                # We need to store the CSV data somewhere to process the next task
+                # For now, we'll just mark it as failed
+                next_task.status = 'FAILED'
+                next_task.save()
+                
+        except Exception as e:
+            logger.error(f"Error processing task {task_id}: {str(e)}")
+            try:
+                task = BulkUploadTask.objects.get(id=task_id)
+                task.status = 'FAILED'
+                task.save()
+            except:
+                pass
+    
+    def _process_user_row(self, task, row):
+        """Process a single user row from the CSV"""
+        try:
+            # Clean input data
+            email = row.get('email', '').strip()
+            username = row.get('username', '').strip()
+            name = row.get('name', '').strip()
+            
+            if not email or not username:
+                return
+            
+            # Check if user already exists
+            user_exists = User.objects.filter(Q(email=email) | Q(username=username)).exists()
+            
+            if user_exists:
+                # User already exists, just record it
+                BulkUploadUser.objects.create(
+                    task=task,
+                    username=username,
+                    email=email,
+                    name=name,
+                    status='EXISTING'
+                )
+            else:
+                # Generate a random password
+                password = ''.join(random.choices(string.ascii_letters + string.digits, k=10))
+                
+                # Create the user
+                user = User.objects.create_user(
+                    username=username,
+                    email=email,
+                    password=password
+                )
+                
+                # Set name if provided
+                if name:
+                    name_parts = name.split(' ', 1)
+                    user.first_name = name_parts[0]
+                    if len(name_parts) > 1:
+                        user.last_name = name_parts[1]
+                    user.save()
+                
+                # Record the user in our table
+                BulkUploadUser.objects.create(
+                    task=task,
+                    username=username,
+                    email=email,
+                    name=name,
+                    password=password,  # Store plain password for admin reference
+                    status='CREATED'
+                )
+        except Exception as e:
+            logger.error(f"Error processing user row: {str(e)}")
+    
+    @swagger_auto_schema(
+        methods=['get'],
+        operation_description="Get upload task progress",
+        responses={200: BulkUploadTaskSerializer()}
+    )
+    @action(detail=True, methods=['get'])
+    def progress(self, request, pk=None):
+        """Get the progress of a specific upload task"""
+        try:
+            task = BulkUploadTask.objects.get(id=pk)
+            return Response(BulkUploadTaskSerializer(task).data)
+        except BulkUploadTask.DoesNotExist:
+            return Response({'error': 'Task not found'}, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+    @swagger_auto_schema(
+        methods=['get'],
+        operation_description="Get all upload tasks",
+        responses={200: BulkUploadTaskSerializer(many=True)}
+    )
+    @action(detail=False, methods=['get'])
+    def tasks(self, request):
+        """Get all upload tasks"""
+        tasks = BulkUploadTask.objects.all()
+        return Response(BulkUploadTaskSerializer(tasks, many=True).data)
+    
+    @swagger_auto_schema(
+        methods=['get'],
+        operation_description="Get users for a specific upload task",
+        responses={200: BulkUploadUserSerializer(many=True)}
+    )
+    @action(detail=True, methods=['get'])
+    def users(self, request, pk=None):
+        """Get all users for a specific upload task"""
+        try:
+            task = BulkUploadTask.objects.get(id=pk)
+            users = BulkUploadUser.objects.filter(task=task)
+            return Response(BulkUploadUserSerializer(users, many=True).data)
+        except BulkUploadTask.DoesNotExist:
+            return Response({'error': 'Task not found'}, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

@@ -1,320 +1,654 @@
-import React, { useState, useEffect } from 'react';
-import { useAdminService } from '@/hooks/useAdminService';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
+import { 
+  Box, 
+  Button, 
+  CircularProgress, 
+  Paper, 
+  Table, 
+  TableBody, 
+  TableCell, 
+  TableContainer, 
+  TableHead, 
+  TableRow, 
+  Typography, 
+  Alert, 
+  Pagination,
+  Chip,
+  LinearProgress,
+  Divider,
+  IconButton,
+  Tooltip,
+  useTheme,
+  alpha,
+  Grid
+} from '@mui/material';
+import { AdminService } from '@/services/adminService';
+import { useSnackbar } from 'notistack';
+import DownloadIcon from '@mui/icons-material/Download';
+import DeleteIcon from '@mui/icons-material/Delete';
+import StopIcon from '@mui/icons-material/Stop';
+import CloseIcon from '@mui/icons-material/Close';
+import ContentCopyIcon from '@mui/icons-material/ContentCopy';
+import { useAdmin } from '@/context/AdminContext';
+import axios from 'axios';
 
-interface BulkRegistrationResultsProps {
-  taskId: string;
-  onDelete?: () => void;
-  onClose?: () => void;
-}
-
+// Updated interfaces to match the new API response structure
 interface CreatedUser {
-  email: string;
+  id?: number;
   username: string;
-  password: string;
-  name?: string;
+  email: string;
+  name: string;
+  password?: string;
+  status: string;
+  created_at: string;
 }
 
 interface TaskData {
-  id: string;
-  status: string;
-  total_users: number;
-  processed_users: number;
-  errors: string[];
+  id: number;
   file_name: string;
+  status: string;
+  total_rows: number;
+  processed_rows: number;
   created_at: string;
   updated_at: string;
-  created_by: any;
+  progress_percentage: number;
 }
 
 interface ResultsData {
   task: TaskData;
   users: CreatedUser[];
-  progress: number;
   total: number;
   page: number;
   page_size: number;
   total_pages: number;
 }
 
-export default function BulkRegistrationResults({ taskId, onDelete, onClose }: BulkRegistrationResultsProps) {
-  const [results, setResults] = useState<ResultsData | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize, setPageSize] = useState(50);
-  const [isDeleting, setIsDeleting] = useState(false);
-  const [isStopping, setIsStopping] = useState(false);
-  const [pollingInterval, setPollingInterval] = useState<NodeJS.Timeout | null>(null);
-  const adminService = useAdminService();
+interface BulkRegistrationResultsProps {
+  taskId: string | number;
+  onClose?: () => void;
+}
 
-  const fetchUsers = async () => {
+const BulkRegistrationResults: React.FC<BulkRegistrationResultsProps> = ({ taskId, onClose }) => {
+  const [loading, setLoading] = useState<boolean>(true);
+  const [error, setError] = useState<string | null>(null);
+  const [data, setData] = useState<ResultsData | null>(null);
+  const [taskData, setTaskData] = useState<TaskData | null>(null);
+  const [users, setUsers] = useState<CreatedUser[]>([]);
+  const [page, setPage] = useState<number>(1);
+  const [pageSize] = useState<number>(50);
+  const [isProcessing, setIsProcessing] = useState<boolean>(false);
+  const [isWaiting, setIsWaiting] = useState<boolean>(false);
+  const [isCompleted, setIsCompleted] = useState<boolean>(false);
+  const { enqueueSnackbar } = useSnackbar();
+  const { apiKey } = useAdmin();
+  const adminService = new AdminService({ 
+    apiKey: apiKey || ''
+  });
+  const pollingRef = useRef<NodeJS.Timeout | null>(null);
+  const theme = useTheme();
+  const POLLING_INTERVAL = 5000; // 5 seconds between polls
+
+  // Direct API call to get users (without using the service layer that's causing issues)
+  const fetchUsersDirectly = useCallback(async (pageNum: number = 1) => {
     try {
-      const response = await adminService.getBulkTaskUsers(taskId, currentPage, pageSize);
-      if (response.success && response.data) {
-        setResults(response.data);
-        // If still processing, continue polling
-        if (response.data.task.status.toLowerCase() === 'processing') {
-          // Set polling interval if not already set
-          if (!pollingInterval) {
-            const interval = setInterval(fetchUsers, 2000);
-            setPollingInterval(interval);
-          }
-        } else {
-          // Clear polling interval if task is no longer processing
-          if (pollingInterval) {
-            clearInterval(pollingInterval);
-            setPollingInterval(null);
-          }
+      setLoading(true);
+      console.log(`Directly fetching users for task ${taskId}, page ${pageNum}...`);
+      
+      const response = await axios.get(
+        `http://localhost:8000/api/admin-panel/bulk-upload/tasks/${taskId}/users/?page=${pageNum}&page_size=${pageSize}`,
+        {
+          headers: {
+            'X-API-Key': apiKey,
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+          },
+          withCredentials: true
         }
+      );
+      
+      console.log('Direct API response:', response.data);
+      
+      // Handle array response (as seen in your curl output)
+      if (Array.isArray(response.data)) {
+        setUsers(response.data);
+        
+        // If we don't have task data yet, use what we know
+        if (!taskData) {
+          setTaskData({
+            id: Number(taskId),
+            file_name: 'Bulk Upload',
+            status: 'COMPLETED',
+            total_rows: response.data.length,
+            processed_rows: response.data.length,
+            created_at: response.data[0]?.created_at || new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+            progress_percentage: 100
+          });
+        }
+        
+        // Format data for the component
+        setData({
+          task: taskData || {
+            id: Number(taskId),
+            file_name: 'Bulk Upload',
+            status: 'COMPLETED',
+            total_rows: response.data.length,
+            processed_rows: response.data.length,
+            created_at: response.data[0]?.created_at || new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+            progress_percentage: 100
+          },
+          users: response.data,
+          total: response.data.length,
+          page: pageNum,
+          page_size: pageSize,
+          total_pages: Math.ceil(response.data.length / pageSize)
+        });
+        
+        setIsCompleted(true);
+        setIsProcessing(false);
+        setIsWaiting(false);
+      } 
+      // Handle paginated response
+      else if (response.data && typeof response.data === 'object') {
+        const responseData = response.data;
+        
+        if (responseData.results) {
+          setUsers(responseData.results);
+          
+          // Format data for the component
+          setData({
+            task: taskData || {
+              id: Number(taskId),
+              file_name: 'Bulk Upload',
+              status: 'COMPLETED',
+              total_rows: responseData.count || responseData.results.length,
+              processed_rows: responseData.count || responseData.results.length,
+              created_at: responseData.results[0]?.created_at || new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+              progress_percentage: 100
+            },
+            users: responseData.results,
+            total: responseData.count || responseData.results.length,
+            page: pageNum,
+            page_size: pageSize,
+            total_pages: Math.ceil((responseData.count || responseData.results.length) / pageSize)
+          });
+          
+          setIsCompleted(true);
+          setIsProcessing(false);
+          setIsWaiting(false);
+        }
+      }
+    } catch (err: any) {
+      console.error('Error directly fetching users:', err);
+      
+      // If we get a 404 or other error, the task might not be completed yet
+      // Let's check the progress instead
+      checkTaskProgress();
+      
+      if (!data && !taskData) {
+        setError('Failed to fetch results. The task may still be processing.');
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, [taskId, apiKey, pageSize, taskData, data]);
+
+  // Check task progress (only used for processing/waiting tasks)
+  const checkTaskProgress = useCallback(async () => {
+    try {
+      console.log(`Checking progress for task ${taskId}...`);
+      
+      const response = await axios.get(
+        `http://localhost:8000/api/admin-panel/bulk-upload/tasks/${taskId}/progress/`,
+        {
+          headers: {
+            'X-API-Key': apiKey,
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+          },
+          withCredentials: true
+        }
+      );
+      
+      console.log('Progress response:', response.data);
+      
+      if (response.data) {
+        setTaskData(response.data);
+        
+        const status = (response.data.status || '').toLowerCase();
+        setIsProcessing(status === 'processing');
+        setIsWaiting(status === 'waiting');
+        setIsCompleted(status === 'completed');
+        
+        // If completed, fetch the users
+        if (status === 'completed') {
+          fetchUsersDirectly(page);
+          
+          // Clear polling if it exists
+          if (pollingRef.current) {
+            clearTimeout(pollingRef.current);
+            pollingRef.current = null;
+          }
+        } 
+        // If still processing or waiting, continue polling
+        else if (status === 'processing' || status === 'waiting') {
+          // Set up polling
+          if (pollingRef.current) {
+            clearTimeout(pollingRef.current);
+          }
+          pollingRef.current = setTimeout(checkTaskProgress, POLLING_INTERVAL);
+        }
+      }
+    } catch (err: any) {
+      console.error('Error checking task progress:', err);
+      
+      // If we can't check progress and don't have data, show error
+      if (!data && !taskData) {
+        setError('Failed to check task progress.');
+      }
+      
+      // Try again after polling interval
+      if (pollingRef.current) {
+        clearTimeout(pollingRef.current);
+      }
+      pollingRef.current = setTimeout(checkTaskProgress, POLLING_INTERVAL);
+    }
+  }, [taskId, apiKey, page, fetchUsersDirectly, data, taskData]);
+
+  // Initial data loading
+  useEffect(() => {
+    // First try to fetch users directly (assuming task is completed)
+    fetchUsersDirectly(page)
+      .catch(() => {
+        // If that fails, check the progress
+        checkTaskProgress();
+      });
+    
+    // Cleanup function
+    return () => {
+      if (pollingRef.current) {
+        clearTimeout(pollingRef.current);
+      }
+    };
+  }, [fetchUsersDirectly, checkTaskProgress, page]);
+
+  // Handle page change
+  const handlePageChange = (_event: React.ChangeEvent<unknown>, value: number) => {
+    setPage(value);
+  };
+
+  // Handle download
+  const handleDownload = async () => {
+    try {
+      await adminService.downloadBulkRegisterResults(String(taskId));
+      enqueueSnackbar('Download started', { variant: 'success' });
+    } catch (err: any) {
+      console.error('Error downloading results:', err);
+      enqueueSnackbar('Error downloading results: ' + (err.message || 'Unknown error'), { variant: 'error' });
+    }
+  };
+
+  // Handle delete users
+  const handleDeleteUsers = async () => {
+    if (!window.confirm('Are you sure you want to delete all users created in this bulk upload?')) {
+      return;
+    }
+
+    try {
+      setLoading(true);
+      const response = await adminService.deleteBulkTaskUsers(String(taskId));
+      
+      if (response.success) {
+        enqueueSnackbar('Users deleted successfully', { variant: 'success' });
+        if (onClose) onClose();
       } else {
-        setError(response.message || 'Failed to fetch results');
-        if (pollingInterval) {
-          clearInterval(pollingInterval);
-          setPollingInterval(null);
-        }
+        throw new Error(response.message || 'Failed to delete users');
       }
-    } catch (error) {
-      setError('Error fetching results');
-      if (pollingInterval) {
-        clearInterval(pollingInterval);
-        setPollingInterval(null);
-      }
+    } catch (err: any) {
+      console.error('Error deleting users:', err);
+      enqueueSnackbar('Error deleting users: ' + (err.message || 'Unknown error'), { variant: 'error' });
     } finally {
       setLoading(false);
     }
   };
 
-  useEffect(() => {
-    fetchUsers();
-    
-    // Cleanup function to clear interval when component unmounts
-    return () => {
-      if (pollingInterval) {
-        clearInterval(pollingInterval);
-      }
-    };
-  }, [taskId, currentPage, pageSize]);
-
-  const handleDownload = async () => {
-    try {
-      await adminService.downloadBulkRegisterResults(taskId);
-    } catch (error) {
-      setError('Error downloading results');
-    }
-  };
-
-  const handleDelete = async () => {
-    if (!confirm('Are you sure you want to delete all users from this bulk upload? This action cannot be undone.')) {
-      return;
-    }
-
-    setIsDeleting(true);
-    try {
-      const response = await adminService.deleteBulkTaskUsers(taskId);
-      if (response.success) {
-        onDelete?.();
-      } else {
-        setError(response.message || 'Failed to delete users');
-      }
-    } catch (error) {
-      setError('Error deleting users');
-    } finally {
-      setIsDeleting(false);
-    }
-  };
-
+  // Handle stop processing
   const handleStopProcessing = async () => {
-    if (!confirm('Are you sure you want to stop processing this bulk upload?')) {
+    if (!window.confirm('Are you sure you want to stop processing this bulk upload?')) {
       return;
     }
 
-    setIsStopping(true);
     try {
-      const response = await adminService.stopBulkTaskProcessing(taskId);
+      setLoading(true);
+      const response = await adminService.stopBulkTaskProcessing(String(taskId));
+      
       if (response.success) {
-        // Refresh data
-        fetchUsers();
+        enqueueSnackbar('Processing stopped', { variant: 'success' });
+        checkTaskProgress();
       } else {
-        setError(response.message || 'Failed to stop processing');
+        throw new Error(response.message || 'Failed to stop processing');
       }
-    } catch (error) {
-      setError('Error stopping processing');
+    } catch (err: any) {
+      console.error('Error stopping processing:', err);
+      enqueueSnackbar('Error stopping processing: ' + (err.message || 'Unknown error'), { variant: 'error' });
     } finally {
-      setIsStopping(false);
+      setLoading(false);
     }
   };
 
-  if (loading) {
+  // Copy to clipboard
+  const copyToClipboard = (text: string) => {
+    navigator.clipboard.writeText(text);
+    enqueueSnackbar('Copied to clipboard', { variant: 'success' });
+  };
+
+  // Get status chip
+  const getStatusChip = (status: string | undefined) => {
+    let color;
+    let label = status || 'Unknown';
+    
+    switch ((status || '').toLowerCase()) {
+      case 'created':
+        color = theme.palette.success.main;
+        label = 'Created';
+        break;
+      case 'existing':
+        color = theme.palette.info.main;
+        label = 'Already Exists';
+        break;
+      default:
+        color = theme.palette.grey[500];
+    }
+    
     return (
-      <div className="flex justify-center items-center py-4">
-        <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-gray-900"></div>
-      </div>
+      <Chip 
+        label={label} 
+        size="small"
+        sx={{ 
+          backgroundColor: alpha(color, 0.1),
+          color: color,
+          fontWeight: 'medium',
+          '& .MuiChip-label': {
+            px: 1
+          }
+        }}
+      />
+    );
+  };
+
+  // Loading state
+  if (loading && !data && !taskData) {
+    return (
+      <Box display="flex" justifyContent="center" alignItems="center" p={6}>
+        <CircularProgress />
+      </Box>
     );
   }
 
-  if (error) {
+  // Error state
+  if (error && !data && !taskData) {
     return (
-      <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded relative" role="alert">
-        <strong className="font-bold">Error: </strong>
-        <span className="block sm:inline">{error}</span>
-      </div>
+      <Box p={3}>
+        <Alert severity="error">{error}</Alert>
+      </Box>
     );
   }
-
-  if (!results) {
-    return null;
-  }
-
-  const task = results.task;
-  const progress = results.progress;
-  const isProcessing = task.status.toLowerCase() === 'processing';
 
   return (
-    <div className="space-y-4">
-      <div className="flex justify-between items-center">
-        <div>
-          <h3 className="text-lg font-medium">Upload Results</h3>
-          <p className="text-sm text-gray-500">
-            Total Users: {results.total} | Page {results.page} of {results.total_pages}
-          </p>
-          {isProcessing && (
-            <div className="mt-2">
-              <div className="flex items-center">
-                <div className="flex-1 bg-gray-200 rounded-full h-2.5 dark:bg-gray-700 mr-2">
-                  <div 
-                    className="bg-blue-600 h-2.5 rounded-full transition-all duration-500"
-                    style={{ width: `${progress}%` }}
-                  ></div>
-                </div>
-                <span className="text-sm text-gray-500">
-                  {task.processed_users} / {task.total_users} ({progress}%)
-                </span>
-              </div>
-              <p className="text-sm text-blue-600 mt-1">Processing users...</p>
-            </div>
-          )}
-          {task.status.toLowerCase() === 'stopped' && (
-            <p className="text-sm text-yellow-600 mt-1">Processing was stopped manually.</p>
-          )}
-        </div>
-        <div className="space-x-2">
-          {isProcessing && (
-            <button
-              onClick={handleStopProcessing}
-              disabled={isStopping}
-              className="px-4 py-2 bg-yellow-600 text-white rounded hover:bg-yellow-700 transition-colors disabled:opacity-50"
-            >
-              {isStopping ? 'Stopping...' : 'Stop Processing'}
-            </button>
-          )}
-          <button
-            onClick={handleDownload}
-            disabled={isProcessing}
-            className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 transition-colors disabled:opacity-50"
-          >
-            Download CSV
-          </button>
-          <button
-            onClick={handleDelete}
-            disabled={isDeleting || isProcessing}
-            className="px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 transition-colors disabled:opacity-50"
-          >
-            {isDeleting ? 'Deleting...' : 'Delete All Users'}
-          </button>
-          {onClose && (
-            <button
-              onClick={onClose}
-              className="px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700 transition-colors"
-            >
-              Close
-            </button>
-          )}
-        </div>
-      </div>
+    <Box>
+      <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
+        <Typography variant="h5" fontWeight="bold">
+          Upload Results
+        </Typography>
+        {onClose && (
+          <Tooltip title="Close">
+            <IconButton onClick={onClose} size="small">
+              <CloseIcon />
+            </IconButton>
+          </Tooltip>
+        )}
+      </Box>
 
-      {task.errors && task.errors.length > 0 && (
-        <div className="bg-yellow-50 border border-yellow-200 text-yellow-700 px-4 py-3 rounded">
-          <p className="font-bold">Warnings/Errors:</p>
-          <ul className="list-disc list-inside">
-            {task.errors.map((error, index) => (
-              <li key={index} className="text-sm">{error}</li>
-            ))}
-          </ul>
-        </div>
+      {/* Task Details */}
+      {(taskData || (data && data.task)) && (
+        <Box mb={4}>
+          <Paper 
+            elevation={1} 
+            sx={{ 
+              p: 3, 
+              borderRadius: 2,
+              bgcolor: alpha(theme.palette.primary.main, 0.03)
+            }}
+          >
+            <Typography variant="h6" gutterBottom fontWeight="medium">
+              Task Details
+            </Typography>
+            
+            <Grid container spacing={2} sx={{ mt: 1 }}>
+              <Grid item xs={12} sm={6} md={3}>
+                <Typography variant="body2" color="text.secondary">
+                  File Name
+                </Typography>
+                <Typography variant="body1" fontWeight="medium">
+                  {(taskData || data?.task)?.file_name || 'Unknown'}
+                </Typography>
+              </Grid>
+              
+              <Grid item xs={12} sm={6} md={3}>
+                <Typography variant="body2" color="text.secondary">
+                  Status
+                </Typography>
+                <Box display="flex" alignItems="center" mt={0.5}>
+                  <Chip 
+                    label={(taskData || data?.task)?.status || 'Unknown'} 
+                    size="small"
+                    color={
+                      isCompleted ? 'success' :
+                      isProcessing ? 'info' :
+                      isWaiting ? 'warning' :
+                      'error'
+                    }
+                    variant="outlined"
+                  />
+          {isProcessing && (
+                    <CircularProgress size={16} sx={{ ml: 1 }} />
+                  )}
+                </Box>
+              </Grid>
+              
+              <Grid item xs={12} sm={6} md={3}>
+                <Typography variant="body2" color="text.secondary">
+                  Created
+                </Typography>
+                <Typography variant="body1">
+                  {(taskData || data?.task)?.created_at ? 
+                    new Date((taskData || data?.task)?.created_at).toLocaleString() : 
+                    'Unknown'}
+                </Typography>
+              </Grid>
+              
+              <Grid item xs={12} sm={6} md={3}>
+                <Typography variant="body2" color="text.secondary">
+                  Progress
+                </Typography>
+                <Typography variant="body1">
+                  {(taskData || data?.task)?.processed_rows || 0} / {(taskData || data?.task)?.total_rows || 0} users
+                </Typography>
+              </Grid>
+            </Grid>
+            
+            {isProcessing && (
+              <Box mt={2}>
+                <LinearProgress 
+                  variant="determinate" 
+                  value={(taskData || data?.task)?.progress_percentage || 0} 
+                  sx={{ 
+                    height: 8, 
+                    borderRadius: 1,
+                    mt: 1
+                  }} 
+                />
+                <Box display="flex" justifyContent="space-between" mt={0.5}>
+                  <Typography variant="body2" color="text.secondary">
+                    Processing users...
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    {(taskData || data?.task)?.progress_percentage || 0}%
+                  </Typography>
+                </Box>
+              </Box>
+            )}
+          </Paper>
+        </Box>
       )}
 
-      <div className="overflow-x-auto">
-        <table className="min-w-full divide-y divide-gray-200">
-          <thead className="bg-gray-50">
-            <tr>
-              <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Name
-              </th>
-              <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Email
-              </th>
-              <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Username
-              </th>
-              <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                Password
-              </th>
-            </tr>
-          </thead>
-          <tbody className="bg-white divide-y divide-gray-200">
-            {results.users.map((user, index) => (
-              <tr key={index}>
-                <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
-                  {user.name || 'N/A'}
-                </td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                  {user.email}
-                </td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                  {user.username}
-                </td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                  <code className="bg-gray-100 px-2 py-1 rounded">{user.password}</code>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      {/* Action Buttons */}
+      <Box mb={3} display="flex" gap={2} flexWrap="wrap">
+        <Button 
+          variant="contained" 
+          color="primary" 
+            onClick={handleDownload}
+          disabled={loading || isWaiting}
+          startIcon={<DownloadIcon />}
+          sx={{ borderRadius: 2 }}
+        >
+          Download Results
+        </Button>
+        <Button 
+          variant="contained" 
+          color="error" 
+          onClick={handleDeleteUsers}
+          disabled={loading || isWaiting}
+          startIcon={<DeleteIcon />}
+          sx={{ borderRadius: 2 }}
+        >
+          Delete Users
+        </Button>
+        {isProcessing && (
+          <Button 
+            variant="contained" 
+            color="warning" 
+            onClick={handleStopProcessing}
+            disabled={loading}
+            startIcon={<StopIcon />}
+            sx={{ borderRadius: 2 }}
+          >
+            Stop Processing
+          </Button>
+        )}
+      </Box>
 
-      <div className="flex items-center justify-between border-t border-gray-200 bg-white px-4 py-3 sm:px-6">
-        <div className="flex items-center">
-          <label className="mr-2 text-sm text-gray-700">Users per page:</label>
-          <select
-            value={pageSize}
-            onChange={(e) => {
-              setPageSize(Number(e.target.value));
-              setCurrentPage(1);
+      <Divider sx={{ my: 3 }} />
+
+      {/* User Results Section */}
+      <Box mb={2} display="flex" justifyContent="space-between" alignItems="center">
+        <Typography variant="h6" fontWeight="medium">
+          User Results
+        </Typography>
+        {data?.total && (
+          <Typography variant="body2" color="text.secondary">
+            Total: {data.total} users
+          </Typography>
+        )}
+      </Box>
+
+      {/* Show users only if completed */}
+      {isCompleted && users && users.length > 0 ? (
+        <>
+          <TableContainer 
+            component={Paper} 
+            elevation={1}
+            sx={{ 
+              borderRadius: 2,
+              overflow: 'hidden',
+              mb: 2
             }}
-            className="rounded border-gray-300 text-sm"
           >
-            {[10, 25, 50, 100].map(size => (
-              <option key={size} value={size}>{size}</option>
-            ))}
-          </select>
-        </div>
-        <div className="flex justify-between">
-          <button
-            onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-            disabled={currentPage === 1}
-            className="relative inline-flex items-center px-4 py-2 text-sm font-medium rounded-md text-gray-700 bg-white border border-gray-300 hover:bg-gray-50 disabled:opacity-50"
-          >
-            Previous
-          </button>
-          <button
-            onClick={() => setCurrentPage(p => p + 1)}
-            disabled={currentPage >= results.total_pages}
-            className="ml-3 relative inline-flex items-center px-4 py-2 text-sm font-medium rounded-md text-gray-700 bg-white border border-gray-300 hover:bg-gray-50 disabled:opacity-50"
-          >
-            Next
-          </button>
-        </div>
-      </div>
-    </div>
+            <Table>
+              <TableHead sx={{ bgcolor: alpha(theme.palette.primary.main, 0.05) }}>
+                <TableRow>
+                  <TableCell sx={{ fontWeight: 'bold' }}>Name</TableCell>
+                  <TableCell sx={{ fontWeight: 'bold' }}>Username</TableCell>
+                  <TableCell sx={{ fontWeight: 'bold' }}>Email</TableCell>
+                  <TableCell sx={{ fontWeight: 'bold' }}>Status</TableCell>
+                  <TableCell sx={{ fontWeight: 'bold' }}>Password</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {users.map((user, index) => (
+                  <TableRow key={index} hover>
+                    <TableCell>{user.name || '-'}</TableCell>
+                    <TableCell>{user.username}</TableCell>
+                    <TableCell>{user.email}</TableCell>
+                    <TableCell>{getStatusChip(user.status)}</TableCell>
+                    <TableCell>
+                      {user.password ? (
+                        <Box display="flex" alignItems="center" gap={1}>
+                          <Typography 
+                            variant="body2" 
+                            sx={{ 
+                              fontFamily: 'monospace', 
+                              bgcolor: alpha(theme.palette.primary.main, 0.1),
+                              p: 0.5,
+                              px: 1,
+                              borderRadius: 1
+                            }}
+                          >
+                            {user.password}
+                          </Typography>
+                          <Tooltip title="Copy password">
+                            <IconButton 
+                              size="small" 
+                              onClick={() => copyToClipboard(user.password || '')}
+                              sx={{ color: theme.palette.primary.main }}
+                            >
+                              <ContentCopyIcon fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                        </Box>
+                      ) : (
+                        '-'
+                      )}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </TableContainer>
+          
+          {data?.total_pages && data.total_pages > 1 && (
+            <Box display="flex" justifyContent="center" mt={3}>
+              <Pagination 
+                count={data.total_pages} 
+                page={page} 
+                onChange={handlePageChange} 
+                color="primary" 
+                shape="rounded"
+                size="large"
+              />
+            </Box>
+          )}
+        </>
+      ) : (
+        <Alert 
+          severity="info"
+          sx={{ 
+            borderRadius: 2,
+            '& .MuiAlert-message': {
+              width: '100%',
+              textAlign: 'center'
+            }
+          }}
+        >
+          {isProcessing ? 'Processing users...' : 
+           isWaiting ? 'Task is waiting to be processed...' : 
+           'No users found for this task.'}
+        </Alert>
+      )}
+    </Box>
   );
-} 
+};
+
+export default BulkRegistrationResults; 

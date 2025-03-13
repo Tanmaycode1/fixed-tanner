@@ -88,14 +88,47 @@ export const api = apiClient;
 export const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api';
 export const BASE_URL = API_URL.replace('/api', '');
 
-// Add auth token to requests if available
+// Add auth token to requests if available, but only if X-API-Key is not present
 api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('access_token');
-  if (token && !config.url?.includes('token/refresh')) {
-    config.headers.Authorization = `Bearer ${token}`;
+  // Check if this is an admin API request (has X-API-Key header)
+  const hasApiKeyHeader = config.headers && 
+    (('X-API-Key' in config.headers && config.headers['X-API-Key']) || 
+     (config.headers.get && config.headers.get('X-API-Key')));
+  
+  // Log headers in development
+  if (process.env.NODE_ENV !== 'production') {
+    const headersToLog = {
+      url: config.url,
+      hasApiKeyHeader,
+      hasAuthHeader: config.headers && 'Authorization' in config.headers
+    };
+    console.debug('Request headers check:', headersToLog);
   }
+  
+  // Only add bearer token for non-admin requests
+  if (!hasApiKeyHeader) {
+    const token = localStorage.getItem('access_token');
+    if (token && !config.url?.includes('token/refresh')) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+  } else {
+    // If we have an API key header, remove any Authorization header to avoid conflicts
+    if (config.headers && 'Authorization' in config.headers) {
+      delete config.headers.Authorization;
+    }
+  }
+  
   return config;
 });
+
+// Add a request cache to prevent duplicate requests
+const requestCache = new Map<string, {
+  timestamp: number;
+  promise: Promise<any>;
+}>();
+
+// Cache expiration time in milliseconds (5 seconds)
+const CACHE_EXPIRATION = 5000;
 
 // Add response interceptor for error handling
 api.interceptors.response.use(
@@ -105,6 +138,7 @@ api.interceptors.response.use(
   async (error) => {
     const originalRequest = error.config;
     
+    // Handle authentication errors
     if (error?.response?.status === 401 && !originalRequest?._retry && !originalRequest?.url?.includes('token/refresh')) {
       originalRequest._retry = true;
       
@@ -120,15 +154,52 @@ api.interceptors.response.use(
         originalRequest.headers.Authorization = `Bearer ${response.data.access}`;
         return api(originalRequest);
       } catch (refreshError) {
+        // Clear auth tokens and redirect to login
         localStorage.removeItem('access_token');
         localStorage.removeItem('refresh_token');
-        window.location.href = '/auth/login';
+        
+        // Don't redirect if we're already on the login page
+        if (!window.location.pathname.includes('/auth/login')) {
+          window.location.href = '/auth/login';
+        }
         return Promise.reject(refreshError);
       }
     }
+    
+    // Handle API key errors
+    if (error?.response?.status === 403 && error?.response?.data?.detail?.includes('API key')) {
+      console.error('API Key authentication failed:', error.response.data);
+      return Promise.reject(new Error('API key authentication failed. Please check your API key.'));
+    }
+    
     return Promise.reject(error);
   }
 );
+
+// Create a function to handle cached requests
+export const cachedRequest = async <T>(
+  requestFn: () => Promise<T>,
+  cacheKey: string,
+  forceRefresh = false,
+  expirationTime = CACHE_EXPIRATION
+): Promise<T> => {
+  const now = Date.now();
+  const cachedItem = requestCache.get(cacheKey);
+  
+  // Return cached promise if it exists and is not expired
+  if (!forceRefresh && cachedItem && now - cachedItem.timestamp < expirationTime) {
+    return cachedItem.promise;
+  }
+  
+  // Create new promise and cache it
+  const promise = requestFn();
+  requestCache.set(cacheKey, {
+    timestamp: now,
+    promise
+  });
+  
+  return promise;
+};
 
 export class ApiError extends Error {
   constructor(

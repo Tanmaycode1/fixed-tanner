@@ -1,282 +1,472 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { useAdminService } from '@/hooks/useAdminService';
+import React, { useState, useEffect, useCallback } from 'react';
+import { 
+  Box, 
+  Button, 
+  Card, 
+  CardContent, 
+  CircularProgress, 
+  Container, 
+  Divider, 
+  Grid, 
+  Paper, 
+  Typography, 
+  Alert, 
+  LinearProgress,
+  Chip,
+  IconButton,
+  Tooltip,
+  useTheme,
+  alpha
+} from '@mui/material';
+import { AdminService } from '@/services/adminService';
+import { useSnackbar } from 'notistack';
+import FileUploadBox from '@/components/FileUploadBox';
 import BulkRegistrationResults from '@/components/BulkRegistrationResults';
+import { AdminApiConfig } from '@/services/adminService';
+import RefreshIcon from '@mui/icons-material/Refresh';
+import VisibilityIcon from '@mui/icons-material/Visibility';
+import CloudUploadIcon from '@mui/icons-material/CloudUpload';
+import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
+import AccessTimeIcon from '@mui/icons-material/AccessTime';
+import { useAdmin } from '@/context/AdminContext';
 
-interface UploadProgress {
-  status: string;
-  progress: number;
-  total: number;
-  processed: number;
-}
-
+// Updated interface to match the new API response structure
 interface BulkUploadTask {
-  id: string;
-  status: string;
-  created_at: string;
-  total_users: number;
-  processed_users: number;
+  id: number;
   file_name: string;
-  errors: string[];
-  created_by: any;
+  status: string;
+  total_rows: number;
+  processed_rows: number;
+  created_at: string;
   updated_at: string;
+  progress_percentage: number;
 }
 
-export default function BulkUpload() {
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [uploadStatus, setUploadStatus] = useState<'idle' | 'uploading' | 'processing' | 'success' | 'error'>('idle');
+export default function BulkUploadPage() {
+  const [file, setFile] = useState<File | null>(null);
+  const [uploading, setUploading] = useState<boolean>(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [currentTaskId, setCurrentTaskId] = useState<number | null>(null);
   const [tasks, setTasks] = useState<BulkUploadTask[]>([]);
-  const [expandedTaskId, setExpandedTaskId] = useState<string | null>(null);
-  const adminService = useAdminService();
+  const [loading, setLoading] = useState<boolean>(true);
+  const [showResults, setShowResults] = useState<boolean>(false);
+  const [refreshing, setRefreshing] = useState<boolean>(false);
+  const { enqueueSnackbar } = useSnackbar();
+  const theme = useTheme();
+  const { apiKey } = useAdmin();
+  
+  // Initialize AdminService with the API key from context
+  const adminService = new AdminService({ 
+    apiKey: apiKey || ''
+  });
 
-  const fetchTasks = async () => {
+  const fetchTasks = useCallback(async (showRefreshIndicator = true) => {
     try {
+      if (showRefreshIndicator) {
+        setRefreshing(true);
+      } else {
+        setLoading(true);
+      }
+      
       const response = await adminService.getBulkUploadTasks();
+      
       if (response.success && response.data) {
-        setTasks(response.data.results);
+        // Ensure we have an array of tasks
+        const taskResults = response.data.results || [];
+        setTasks(taskResults);
+      } else {
+        console.error('Failed to fetch tasks:', response.message);
+        setTasks([]);
+        if (response.message) {
+          enqueueSnackbar(`Failed to fetch tasks: ${response.message}`, { variant: 'error' });
+        }
       }
     } catch (error) {
       console.error('Error fetching tasks:', error);
+      setTasks([]);
+      enqueueSnackbar('Error fetching tasks. Please try again.', { variant: 'error' });
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
     }
-  };
+  }, [adminService, enqueueSnackbar]);
 
   useEffect(() => {
-    fetchTasks();
-  }, []);
-
-  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (file) {
-      setSelectedFile(file);
-      setError(null);
+    fetchTasks(false);
+    
+    // Set up polling to refresh tasks only when there are processing tasks
+    // and limit the polling frequency to reduce unnecessary requests
+    let interval: NodeJS.Timeout | null = null;
+    
+    if (tasks.some(task => ['processing', 'waiting'].includes(task.status.toLowerCase()))) {
+      interval = setInterval(() => {
+        fetchTasks(false);
+      }, 10000); // Poll every 10 seconds
     }
+    
+    return () => {
+      if (interval) {
+        clearInterval(interval);
+      }
+    };
+  }, [fetchTasks, tasks]);
+
+  const handleFileChange = (file: File | null) => {
+    setFile(file);
+    setUploadError(null);
   };
 
   const handleUpload = async () => {
-    if (!selectedFile) {
-      setError('Please select a file to upload');
+    if (!file) {
+      setUploadError('Please select a file to upload');
       return;
     }
 
-    setUploadStatus('uploading');
-    setError(null);
+    setUploading(true);
+    setUploadError(null);
 
     try {
       // Read file as base64
       const reader = new FileReader();
-      
-      reader.onload = async (e) => {
+      reader.readAsDataURL(file);
+      reader.onload = async () => {
         try {
-          const base64 = e.target?.result as string;
+          // Extract base64 content (remove data:application/csv;base64, prefix)
+          const base64Content = reader.result?.toString().split(',')[1];
           
-          // Upload file and get task ID immediately
-          const response = await adminService.bulkRegisterUsers(base64, selectedFile.name);
+          if (!base64Content) {
+            throw new Error('Failed to read file content');
+          }
+
+          // Upload the file
+          const response = await adminService.bulkRegisterUsers(base64Content, file.name);
           
           if (response.success && response.data) {
-            setUploadStatus('success');
-            setSelectedFile(null);
-            
-            // Reset file input
-            const fileInput = document.getElementById('csv-upload') as HTMLInputElement;
-            if (fileInput) {
-              fileInput.value = '';
-            }
-            
-            // Add the new task to the list immediately
-            const newTask: BulkUploadTask = {
-              id: response.data.task_id,
-              status: 'PROCESSING',
-              created_at: new Date().toISOString(),
-              updated_at: new Date().toISOString(),
-              total_users: 0,
-              processed_users: 0,
-              file_name: selectedFile.name,
-              errors: [],
-              created_by: null
-            };
-            
-            setTasks(prevTasks => [newTask, ...prevTasks]);
-            
-            // Expand the new task to show progress
-            setExpandedTaskId(response.data.task_id);
-            
-            // Refresh task list after a short delay
-            setTimeout(() => {
-              fetchTasks();
-            }, 2000);
+            enqueueSnackbar('File uploaded successfully', { variant: 'success' });
+            setCurrentTaskId(response.data.id);
+            setShowResults(true);
+            fetchTasks(); // Refresh task list
+            setFile(null); // Reset file selection
           } else {
-            setUploadStatus('error');
-            setError(response.message || 'Failed to upload file');
+            throw new Error(response.message || 'Upload failed');
           }
-        } catch (error) {
+        } catch (error: any) {
           console.error('Upload error:', error);
-          setUploadStatus('error');
-          setError('Failed to upload file. Please try again.');
+          setUploadError(error.message || 'Failed to upload file');
+          enqueueSnackbar('Upload failed: ' + (error.message || 'Unknown error'), { variant: 'error' });
+        } finally {
+          setUploading(false);
         }
       };
       
       reader.onerror = () => {
-        setUploadStatus('error');
-        setError('Failed to read file. Please try again.');
+        setUploadError('Failed to read file');
+        setUploading(false);
+        enqueueSnackbar('Failed to read file', { variant: 'error' });
       };
-      
-      // Start reading the file
-      reader.readAsDataURL(selectedFile);
-    } catch (error) {
-      console.error('Upload error:', error);
-      setUploadStatus('error');
-      setError('Failed to upload file. Please try again.');
+    } catch (error: any) {
+      console.error('File reading error:', error);
+      setUploadError(error.message || 'Failed to process file');
+      setUploading(false);
+      enqueueSnackbar('File processing failed: ' + (error.message || 'Unknown error'), { variant: 'error' });
     }
+  };
+
+  const handleViewResults = (taskId: number) => {
+    setCurrentTaskId(taskId);
+    setShowResults(true);
+  };
+
+  const handleCloseResults = () => {
+    setShowResults(false);
+    fetchTasks(); // Refresh task list after closing results
   };
 
   const getStatusColor = (status: string) => {
-    switch (status.toLowerCase()) {
-      case 'completed': return 'bg-green-100 text-green-800';
-      case 'processing': return 'bg-blue-100 text-blue-800';
-      case 'failed': return 'bg-red-100 text-red-800';
-      case 'deleted': return 'bg-gray-100 text-gray-800';
-      case 'stopped': return 'bg-yellow-100 text-yellow-800';
-      default: return 'bg-gray-100 text-gray-800';
+    const statusLower = status.toLowerCase();
+    switch (statusLower) {
+      case 'completed':
+        return theme.palette.success;
+      case 'processing':
+        return theme.palette.info;
+      case 'waiting':
+        return theme.palette.warning;
+      case 'failed':
+        return theme.palette.error;
+      default:
+        return {
+          main: theme.palette.text.secondary
+        };
     }
   };
 
-  const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleString();
+  const getStatusChip = (status: string) => {
+    const statusLower = status.toLowerCase();
+    const color = getStatusColor(status);
+    
+    return (
+      <Chip 
+        label={status} 
+        size="small"
+        sx={{ 
+          backgroundColor: alpha(color.main, 0.1),
+          color: color.main,
+          fontWeight: 'medium',
+          '& .MuiChip-label': {
+            px: 1
+          }
+        }}
+        icon={
+          statusLower === 'processing' || statusLower === 'waiting' ? 
+            <CircularProgress size={12} color="inherit" sx={{ ml: 1 }} /> : 
+            undefined
+        }
+      />
+    );
   };
 
-  const handleStopProcessing = async (taskId: string) => {
-    try {
-      const response = await adminService.stopBulkTaskProcessing(taskId);
-      if (response.success) {
-        // Update the task status in the list
-        setTasks(prevTasks => 
-          prevTasks.map(task => 
-            task.id === taskId 
-              ? { ...task, status: 'STOPPED', errors: [...(task.errors || []), 'Processing stopped manually'] }
-              : task
-          )
-        );
+  const formatDate = (dateString: string) => {
+    const date = new Date(dateString);
+    const now = new Date();
+    const diffMs = now.getTime() - date.getTime();
+    const diffMins = Math.round(diffMs / 60000);
+    
+    if (diffMins < 60) {
+      return `${diffMins} minute${diffMins !== 1 ? 's' : ''} ago`;
+    } else if (diffMins < 1440) {
+      const hours = Math.floor(diffMins / 60);
+      return `${hours} hour${hours !== 1 ? 's' : ''} ago`;
       } else {
-        setError(response.message || 'Failed to stop processing');
-      }
-    } catch (error) {
-      setError('Error stopping task processing');
+      return date.toLocaleString();
     }
   };
 
   return (
-    <div className="min-h-screen bg-gray-100 py-6">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="bg-white rounded-lg shadow p-6 mb-6">
-          <h2 className="text-xl font-bold mb-4">Bulk Upload Users</h2>
-          <div className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700">
-                CSV File
-              </label>
-              <input
-                type="file"
-                accept=".csv"
-                onChange={handleFileChange}
-                className="mt-1 block w-full"
-                disabled={uploadStatus !== 'idle'}
-              />
-              <p className="mt-1 text-sm text-gray-500">
-                CSV must contain: name, email, username columns
-              </p>
-            </div>
-
-            {error && (
-              <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded relative">
-                {error}
-              </div>
-            )}
-
-            <button
-              onClick={handleUpload}
-              disabled={!selectedFile || uploadStatus !== 'idle'}
-              className="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700 transition-colors disabled:opacity-50"
+    <Container maxWidth="lg" sx={{ py: 4 }}>
+      <Box mb={4} display="flex" justifyContent="space-between" alignItems="center">
+        <Typography variant="h4" component="h1" fontWeight="bold">
+          Bulk User Registration
+        </Typography>
+        <Tooltip title="Refresh tasks">
+          <IconButton 
+            onClick={() => fetchTasks()} 
+            disabled={refreshing}
+            color="primary"
+          >
+            {refreshing ? <CircularProgress size={24} /> : <RefreshIcon />}
+          </IconButton>
+        </Tooltip>
+      </Box>
+      
+      {showResults && currentTaskId ? (
+        <Box mb={4}>
+          <Paper 
+            elevation={3} 
+            sx={{ 
+              p: 2,
+              borderRadius: 2,
+              overflow: 'hidden'
+            }}
+          >
+            <BulkRegistrationResults 
+              taskId={currentTaskId} 
+              onClose={handleCloseResults} 
+            />
+          </Paper>
+        </Box>
+      ) : (
+        <Grid container spacing={4}>
+          <Grid item xs={12} md={5}>
+            <Card 
+              elevation={3} 
+              sx={{ 
+                height: '100%',
+                borderRadius: 2,
+                overflow: 'hidden'
+              }}
             >
-              {uploadStatus === 'uploading' ? 'Uploading...' : 
-               uploadStatus === 'processing' ? 'Processing...' : 'Upload'}
-            </button>
-          </div>
-        </div>
-
-        <div className="bg-white rounded-lg shadow">
-          <div className="px-6 py-4 border-b border-gray-200">
-            <h3 className="text-lg font-medium">Upload History</h3>
-          </div>
-          <div className="divide-y divide-gray-200">
-            {tasks.map((task) => (
-              <div key={task.id} className="p-6">
-                <div className="flex justify-between items-start">
-                  <div>
-                    <h4 className="font-medium">{task.file_name || 'Unnamed Upload'}</h4>
-                    <p className="text-sm text-gray-500">{formatDate(task.created_at)}</p>
-                    <div className="mt-1 flex items-center space-x-2">
-                      <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${getStatusColor(task.status)}`}>
-                        {task.status}
-                      </span>
-                      {task.errors && task.errors.length > 0 && (
-                        <span className="inline-flex rounded-full px-2 py-0.5 text-xs font-medium bg-yellow-100 text-yellow-800">
-                          Has Errors
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                  <div className="flex space-x-4">
-                    {task.status.toLowerCase() === 'processing' && (
-                      <button
-                        onClick={() => handleStopProcessing(task.id)}
-                        className="text-yellow-600 hover:text-yellow-900"
-                      >
-                        Stop Processing
-                      </button>
-                    )}
-                    <button
-                      onClick={async () => {
-                        if (task.status.toLowerCase() === 'completed') {
-                          try {
-                            await adminService.downloadBulkRegisterResults(task.id);
-                          } catch (error) {
-                            setError('Error downloading results');
-                          }
+              <Box 
+                sx={{ 
+                  p: 2, 
+                  bgcolor: 'primary.main', 
+                  color: 'primary.contrastText',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 1
+                }}
+              >
+                <CloudUploadIcon />
+                <Typography variant="h6" fontWeight="medium">
+                  Upload New CSV File
+                </Typography>
+              </Box>
+              <CardContent sx={{ p: 3 }}>
+                <Box mb={3} p={2} bgcolor="grey.50" borderRadius={1}>
+                  <Typography variant="body2" color="text.secondary" sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                    <InfoOutlinedIcon fontSize="small" color="info" />
+                    Upload a CSV file with user data. The file should include columns for name, username, and email.
+                  </Typography>
+                </Box>
+                
+                <FileUploadBox 
+                  onFileChange={handleFileChange} 
+                accept=".csv"
+                  maxSize={5 * 1024 * 1024} // 5MB
+                  label="Drag and drop a CSV file here, or click to select"
+                />
+                
+                {uploadError && (
+                  <Alert severity="error" sx={{ mt: 2 }}>
+                    {uploadError}
+                  </Alert>
+                )}
+                
+                <Box mt={3} display="flex" justifyContent="flex-end">
+                  <Button 
+                    variant="contained" 
+                    color="primary" 
+              onClick={handleUpload}
+                    disabled={!file || uploading}
+                    startIcon={uploading ? <CircularProgress size={20} color="inherit" /> : <CloudUploadIcon />}
+                    size="large"
+                    sx={{ 
+                      px: 3,
+                      py: 1,
+                      borderRadius: 2,
+                      boxShadow: 2
+                    }}
+                  >
+                    {uploading ? 'Uploading...' : 'Upload CSV'}
+                  </Button>
+                </Box>
+              </CardContent>
+            </Card>
+          </Grid>
+          
+          <Grid item xs={12} md={7}>
+            <Card 
+              elevation={3} 
+              sx={{ 
+                height: '100%',
+                borderRadius: 2,
+                overflow: 'hidden'
+              }}
+            >
+              <Box 
+                sx={{ 
+                  p: 2, 
+                  bgcolor: 'primary.main', 
+                  color: 'primary.contrastText',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 1
+                }}
+              >
+                <AccessTimeIcon />
+                <Typography variant="h6" fontWeight="medium">
+                  Recent Uploads
+                </Typography>
+              </Box>
+              
+              <CardContent sx={{ p: 0 }}>
+                {loading ? (
+                  <Box display="flex" justifyContent="center" alignItems="center" p={6}>
+                    <CircularProgress />
+                  </Box>
+                ) : tasks.length > 0 ? (
+                  <Box>
+                    {tasks.map((task, index) => (
+                      <React.Fragment key={task.id}>
+                        {index > 0 && <Divider />}
+                        <Box 
+                          p={3} 
+                          sx={{
+                            transition: 'all 0.2s',
+                            '&:hover': {
+                              bgcolor: 'action.hover'
+                            }
+                          }}
+                        >
+                          <Box display="flex" justifyContent="space-between" alignItems="flex-start">
+                            <Box>
+                              <Typography variant="subtitle1" fontWeight="medium">
+                                {task.file_name}
+                              </Typography>
+                              <Box display="flex" alignItems="center" gap={1} mt={0.5}>
+                                <Typography variant="body2" color="text.secondary">
+                                  {formatDate(task.created_at)}
+                                </Typography>
+                                <Box sx={{ width: 4, height: 4, borderRadius: '50%', bgcolor: 'text.disabled' }} />
+                                <Typography variant="body2" color="text.secondary">
+                                  {task.processed_rows} / {task.total_rows} users
+                                </Typography>
+                              </Box>
+                              <Box mt={1}>
+                                {getStatusChip(task.status)}
+                              </Box>
+                            </Box>
+                            <Button 
+                              variant="outlined" 
+                              size="small"
+                              onClick={() => handleViewResults(task.id)}
+                              startIcon={<VisibilityIcon />}
+                              sx={{ 
+                                borderRadius: 2,
+                                minWidth: 120
+                              }}
+                            >
+                              View Results
+                            </Button>
+                          </Box>
+                          
+                          {['processing', 'waiting'].includes(task.status.toLowerCase()) && (
+                            <Box mt={2}>
+                              <Box display="flex" justifyContent="space-between" alignItems="center" mb={0.5}>
+                                <Typography variant="body2" color="text.secondary">
+                                  Progress
+                                </Typography>
+                                <Typography variant="body2" color="text.secondary">
+                                  {task.progress_percentage}%
+                                </Typography>
+                              </Box>
+                              <LinearProgress 
+                                variant="determinate" 
+                                value={task.progress_percentage} 
+                                sx={{ 
+                                  height: 6, 
+                                  borderRadius: 1,
+                                  bgcolor: alpha(theme.palette.primary.main, 0.1)
+                                }} 
+                              />
+                            </Box>
+                          )}
+                        </Box>
+                      </React.Fragment>
+                    ))}
+                  </Box>
+                ) : (
+                  <Box p={4} display="flex" justifyContent="center" alignItems="center">
+                    <Alert 
+                      severity="info" 
+                      sx={{ 
+                        width: '100%',
+                        '& .MuiAlert-message': {
+                          width: '100%',
+                          textAlign: 'center'
                         }
                       }}
-                      disabled={task.status.toLowerCase() !== 'completed'}
-                      className="text-green-600 hover:text-green-900 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                      Download CSV
-                    </button>
-                    <button
-                      onClick={() => setExpandedTaskId(expandedTaskId === task.id ? null : task.id)}
-                      className="text-indigo-600 hover:text-indigo-900"
-                    >
-                      {expandedTaskId === task.id ? 'Hide Details' : 'Show Details'}
-                    </button>
-                  </div>
-                </div>
-                
-                {expandedTaskId === task.id && (
-                  <div className="mt-4">
-                    <BulkRegistrationResults
-                      taskId={task.id}
-                      onDelete={() => {
-                        fetchTasks();
-                        setExpandedTaskId(null);
-                      }}
-                      onClose={() => setExpandedTaskId(null)}
-                    />
-                  </div>
+                      No upload tasks found. Upload a CSV file to get started.
+                    </Alert>
+                  </Box>
                 )}
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-    </div>
+              </CardContent>
+            </Card>
+          </Grid>
+        </Grid>
+      )}
+    </Container>
   );
 } 

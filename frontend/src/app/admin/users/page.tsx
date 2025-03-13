@@ -1,12 +1,13 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useAdmin } from '@/context/AdminContext';
 import { AdminService } from '@/services/adminService';
 import Link from 'next/link';
 import { useAdminService } from '@/hooks/useAdminService';
 import { User, PaginatedResponse } from '@/services/adminService';
 import { FiSearch, FiFilter, FiTrash2, FiEdit2, FiX, FiCheck, FiUpload } from 'react-icons/fi';
+import debounce from 'lodash/debounce';
 
 interface ConfirmationModalProps {
   isOpen: boolean;
@@ -59,6 +60,8 @@ export default function UserManagement() {
   const [pageSize, setPageSize] = useState(10);
   const [filterRole, setFilterRole] = useState<'all' | 'user' | 'staff' | 'superuser'>('all');
   const [filterStatus, setFilterStatus] = useState<'all' | 'active' | 'inactive'>('all');
+  const [searchResults, setSearchResults] = useState<User[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
 
   const fetchUsers = async (page: number = currentPage) => {
     if (!apiKey) {
@@ -70,13 +73,33 @@ export default function UserManagement() {
     setLoading(true);
     setError(null);
     try {
-      const response = await adminService.getUserList(page, pageSize);
-      if (response.success && response.data) {
-        const paginatedData = response.data as PaginatedResponse<User>;
-        setUsers(paginatedData.results);
-        setTotalCount(paginatedData.count);
+      // If there's a search query, use the search endpoint
+      if (searchQuery.trim().length > 0) {
+        setIsSearching(true);
+        const response = await adminService.search(searchQuery, 'users');
+        if (response.success && response.data) {
+          // Directly set the users array with search results
+          setUsers(response.data.users);
+          setTotalCount(response.data.users.length);
+        } else {
+          setError(response.message || 'Failed to search users');
+          // Don't clear users if search fails
+          if (!users.length) {
+            setUsers([]);
+            setTotalCount(0);
+          }
+        }
       } else {
-        setError(response.message || 'Failed to fetch users');
+        // Otherwise use the regular user list endpoint
+        setIsSearching(false);
+        const response = await adminService.getUserList(page, pageSize);
+        if (response.success && response.data) {
+          const paginatedData = response.data as PaginatedResponse<User>;
+          setUsers(paginatedData.results);
+          setTotalCount(paginatedData.count);
+        } else {
+          setError(response.message || 'Failed to fetch users');
+        }
       }
     } catch (err) {
       setError('An error occurred while fetching users');
@@ -85,9 +108,36 @@ export default function UserManagement() {
     }
   };
 
+  // Debounced search function
+  const debouncedSearch = useCallback(
+    debounce(() => {
+      fetchUsers(1);
+    }, 500),
+    [searchQuery]
+  );
+
   useEffect(() => {
-    fetchUsers();
-  }, [currentPage, pageSize, filterRole, filterStatus, searchQuery]);
+    debouncedSearch();
+    return () => {
+      debouncedSearch.cancel();
+    };
+  }, [searchQuery, debouncedSearch]);
+
+  useEffect(() => {
+    if (!isSearching) {
+      fetchUsers();
+    }
+  }, [currentPage, pageSize, filterRole, filterStatus]);
+
+  const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setSearchQuery(e.target.value);
+    setCurrentPage(1);
+  };
+
+  const handleSearchClear = () => {
+    setSearchQuery('');
+    setCurrentPage(1);
+  };
 
   const handleDeleteClick = (userId: string) => {
     setUserToDelete(userId);
@@ -143,11 +193,8 @@ export default function UserManagement() {
   };
 
   const filteredUsers = users.filter(user => {
-    const matchesSearch = searchQuery === '' ||
-      user.username.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      user.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      `${user.first_name} ${user.last_name}`.toLowerCase().includes(searchQuery.toLowerCase());
-
+    // We don't need to filter by search query here since the API already did that
+    // Just apply the role and status filters
     const matchesRole = filterRole === 'all' ||
       (filterRole === 'superuser' && user.is_superuser) ||
       (filterRole === 'staff' && user.is_staff && !user.is_superuser) ||
@@ -157,7 +204,7 @@ export default function UserManagement() {
       (filterStatus === 'active' && user.is_active) ||
       (filterStatus === 'inactive' && !user.is_active);
 
-    return matchesSearch && matchesRole && matchesStatus;
+    return matchesRole && matchesStatus;
   });
 
   const handleEdit = (user: User) => {
@@ -216,15 +263,7 @@ export default function UserManagement() {
     }
   };
 
-  if (loading) {
-    return (
-      <div className="flex justify-center items-center h-screen">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900"></div>
-      </div>
-    );
-  }
-
-  if (error) {
+  if (error && !users.length) {
     return <div>Error: {error}</div>;
   }
 
@@ -264,7 +303,13 @@ export default function UserManagement() {
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500"
               />
-              <FiSearch className="absolute left-3 top-3 text-gray-400" />
+              <div className="absolute left-3 top-3 flex items-center">
+                {loading && searchQuery ? (
+                  <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-gray-900 mr-1"></div>
+                ) : (
+                  <FiSearch className="text-gray-400" />
+                )}
+              </div>
             </div>
             <div>
               <select
@@ -309,6 +354,12 @@ export default function UserManagement() {
 
         {/* Users Table */}
         <div className="bg-white shadow-sm rounded-lg overflow-hidden">
+          {error && (
+            <div className="p-4 bg-red-50 border-l-4 border-red-500 text-red-700">
+              <p>{error}</p>
+            </div>
+          )}
+          
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-gray-50">
@@ -336,73 +387,90 @@ export default function UserManagement() {
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
-                {filteredUsers.map((user) => (
-                  <tr key={user.id} className="hover:bg-gray-50">
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <input
-                        type="checkbox"
-                        checked={selectedUsers.has(user.id)}
-                        onChange={() => toggleSelectUser(user.id)}
-                        className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
-                      />
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="flex items-center">
-                        <div className="h-10 w-10 flex-shrink-0">
-                          {user.avatar ? (
-                            <img className="h-10 w-10 rounded-full" src={user.avatar} alt="" />
-                          ) : (
-                            <div className="h-10 w-10 rounded-full bg-gray-200 flex items-center justify-center">
-                              <span className="text-gray-500 font-medium">
-                                {user.first_name?.[0] || user.username[0].toUpperCase()}
-                              </span>
-                            </div>
-                          )}
-                        </div>
-                        <div className="ml-4">
-                          <div className="text-sm font-medium text-gray-900">
-                            {user.first_name} {user.last_name}
-                          </div>
-                          <div className="text-sm text-gray-500">{user.email}</div>
-                        </div>
+                {loading ? (
+                  <tr>
+                    <td colSpan={5} className="px-6 py-12 text-center">
+                      <div className="flex justify-center">
+                        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600"></div>
                       </div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <span className={`inline-flex rounded-full px-2 text-xs font-semibold leading-5 ${
-                        user.is_superuser
-                          ? 'bg-purple-100 text-purple-800'
-                          : user.is_staff
-                          ? 'bg-blue-100 text-blue-800'
-                          : 'bg-gray-100 text-gray-800'
-                      }`}>
-                        {user.is_superuser ? 'Superuser' : user.is_staff ? 'Staff' : 'User'}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <span className={`inline-flex rounded-full px-2 text-xs font-semibold leading-5 ${
-                        user.is_active
-                          ? 'bg-green-100 text-green-800'
-                          : 'bg-red-100 text-red-800'
-                      }`}>
-                        {user.is_active ? 'Active' : 'Inactive'}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                      <button
-                        onClick={() => handleEdit(user)}
-                        className="text-indigo-600 hover:text-indigo-900 mr-4"
-                      >
-                        <FiEdit2 className="h-5 w-5" />
-                      </button>
-                      <button
-                        onClick={() => handleDeleteClick(user.id)}
-                        className="text-red-600 hover:text-red-900"
-                      >
-                        <FiTrash2 className="h-5 w-5" />
-                      </button>
+                      <p className="mt-2 text-sm text-gray-500">Loading users...</p>
                     </td>
                   </tr>
-                ))}
+                ) : filteredUsers.length === 0 ? (
+                  <tr>
+                    <td colSpan={5} className="px-6 py-12 text-center text-gray-500">
+                      {searchQuery ? `No users found matching "${searchQuery}"` : 'No users found'}
+                    </td>
+                  </tr>
+                ) : (
+                  filteredUsers.map((user) => (
+                    <tr key={user.id} className="hover:bg-gray-50">
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <input
+                          type="checkbox"
+                          checked={selectedUsers.has(user.id)}
+                          onChange={() => toggleSelectUser(user.id)}
+                          className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
+                        />
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="flex items-center">
+                          <div className="h-10 w-10 flex-shrink-0">
+                            {user.avatar ? (
+                              <img className="h-10 w-10 rounded-full" src={user.avatar} alt="" />
+                            ) : (
+                              <div className="h-10 w-10 rounded-full bg-gray-200 flex items-center justify-center">
+                                <span className="text-gray-500 font-medium">
+                                  {user.first_name?.[0] || user.username[0].toUpperCase()}
+                                </span>
+                              </div>
+                            )}
+                          </div>
+                          <div className="ml-4">
+                            <div className="text-sm font-medium text-gray-900">
+                              {user.first_name} {user.last_name}
+                            </div>
+                            <div className="text-sm text-gray-500">{user.email}</div>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <span className={`inline-flex rounded-full px-2 text-xs font-semibold leading-5 ${
+                          user.is_superuser
+                            ? 'bg-purple-100 text-purple-800'
+                            : user.is_staff
+                            ? 'bg-blue-100 text-blue-800'
+                            : 'bg-gray-100 text-gray-800'
+                        }`}>
+                          {user.is_superuser ? 'Superuser' : user.is_staff ? 'Staff' : 'User'}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <span className={`inline-flex rounded-full px-2 text-xs font-semibold leading-5 ${
+                          user.is_active
+                            ? 'bg-green-100 text-green-800'
+                            : 'bg-red-100 text-red-800'
+                        }`}>
+                          {user.is_active ? 'Active' : 'Inactive'}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                        <button
+                          onClick={() => handleEdit(user)}
+                          className="text-indigo-600 hover:text-indigo-900 mr-4"
+                        >
+                          <FiEdit2 className="h-5 w-5" />
+                        </button>
+                        <button
+                          onClick={() => handleDeleteClick(user.id)}
+                          className="text-red-600 hover:text-red-900"
+                        >
+                          <FiTrash2 className="h-5 w-5" />
+                        </button>
+                      </td>
+                    </tr>
+                  ))
+                )}
               </tbody>
             </table>
           </div>

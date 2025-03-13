@@ -2,7 +2,7 @@ from rest_framework import serializers
 from django.contrib.auth import get_user_model
 from system_logs.models import SystemLog, UserRole, ModeratorAction
 from posts.models import Post
-from .models import BulkUploadTask, BulkUploadTaskUser
+from .models import BulkUploadTask, BulkUploadUser
 
 User = get_user_model()
 
@@ -29,32 +29,26 @@ class AdminUserSerializer(serializers.ModelSerializer):
             'is_superuser': {'required': False}
         }
 
-class BulkUploadTaskUserSerializer(serializers.ModelSerializer):
-    user_details = AdminUserSerializer(source='user', read_only=True)
-    
+class BulkUploadUserSerializer(serializers.ModelSerializer):
+    """Serializer for users created or identified during bulk upload"""
     class Meta:
-        model = BulkUploadTaskUser
-        fields = ['id', 'email', 'username', 'password', 'name', 'created_at', 'user_details']
-        read_only_fields = ['created_at']
-
-    def to_representation(self, instance):
-        data = super().to_representation(instance)
-        # Ensure these fields are always included in the response
-        data.update({
-            'username': instance.username,
-            'email': instance.email,
-            'password': instance.password,  # This is the plain text password stored for admin reference
-        })
-        return data
+        model = BulkUploadUser
+        fields = ['id', 'username', 'email', 'name', 'password', 'status', 'created_at']
+        read_only_fields = ['id', 'created_at']
 
 class BulkUploadTaskSerializer(serializers.ModelSerializer):
-    created_by = AdminUserSerializer(read_only=True)
+    """Serializer for bulk upload tasks"""
+    progress = serializers.SerializerMethodField()
     
     class Meta:
         model = BulkUploadTask
-        fields = ['id', 'status', 'total_users', 'processed_users', 
-                  'errors', 'file_name', 'created_at', 'updated_at', 'created_by']
-        read_only_fields = ['created_at', 'updated_at']
+        fields = ['id', 'status', 'file_name', 'total_rows', 'processed_rows', 
+                  'progress', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'created_at', 'updated_at']
+    
+    def get_progress(self, obj):
+        """Get the progress percentage of the task"""
+        return obj.progress_percentage
 
 class SystemLogSerializer(serializers.ModelSerializer):
     user = AdminUserSerializer(read_only=True)
@@ -89,6 +83,9 @@ class AdminPostSerializer(serializers.ModelSerializer):
     is_liked = serializers.SerializerMethodField()
     is_saved = serializers.SerializerMethodField()
     trending_data = serializers.SerializerMethodField()
+    image_url = serializers.SerializerMethodField()
+    cover_image_url = serializers.SerializerMethodField()
+    audio_url = serializers.SerializerMethodField()
 
     class Meta:
         model = Post
@@ -98,6 +95,27 @@ class AdminPostSerializer(serializers.ModelSerializer):
             'updated_at', 'comments_count', 'likes_count', 'is_liked',
             'is_saved', 'trending_data'
         ]
+
+    def get_image_url(self, obj):
+        """Return image URL only for NEWS posts"""
+        request = self.context.get('request')
+        if obj.type == 'NEWS' and obj.image and hasattr(obj.image, 'url'):
+            return request.build_absolute_uri(obj.image.url) if request else obj.image.url
+        return None
+
+    def get_cover_image_url(self, obj):
+        """Return image URL for AUDIO posts as cover image"""
+        request = self.context.get('request')
+        if obj.type == 'AUDIO' and obj.image and hasattr(obj.image, 'url'):
+            return request.build_absolute_uri(obj.image.url) if request else obj.image.url
+        return None
+
+    def get_audio_url(self, obj):
+        """Return audio file URL"""
+        request = self.context.get('request')
+        if obj.audio_file and hasattr(obj.audio_file, 'url'):
+            return request.build_absolute_uri(obj.audio_file.url) if request else obj.audio_file.url
+        return None
 
     def get_author(self, obj):
         return {

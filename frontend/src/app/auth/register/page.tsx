@@ -43,7 +43,7 @@ export default function Register() {
         if (response.errors) {
           setErrors(response.errors);
           // Show the first error message as a toast
-          const firstError = Object.values(response.errors)[0]?.[0] || response.message;
+          const firstError = Object.values(response.errors)[0]?.[0] || response.message || 'Registration failed';
           toast.error(firstError);
         } else {
           toast.error(response.message || 'Registration failed');

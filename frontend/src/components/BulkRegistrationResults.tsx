@@ -464,7 +464,7 @@ const BulkRegistrationResults: React.FC<BulkRegistrationResultsProps> = ({ taskI
                 </Typography>
                 <Typography variant="body1">
                   {(taskData || data?.task)?.created_at ? 
-                    new Date((taskData || data?.task)?.created_at).toLocaleString() : 
+                    new Date((taskData || data?.task)?.created_at || '').toLocaleString() : 
                     'Unknown'}
                 </Typography>
               </Grid>

@@ -118,7 +118,7 @@ export function OtherProfileHeader({
             <div className="flex justify-center sm:justify-start mt-4">
               <ProfileStats
                 postCount={profile.post_count || 0}
-                followerCount={profile.followers_count}
+                followersCount={profile.followers_count}
                 followingCount={profile.following_count}
                 onFollowersClick={onFollowersClick}
                 onFollowingClick={onFollowingClick}

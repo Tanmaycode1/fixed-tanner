@@ -5,7 +5,7 @@ from django.conf import settings
 class UserProfileSerializer(serializers.ModelSerializer):
     avatar_url = serializers.SerializerMethodField()
     full_name = serializers.SerializerMethodField()
-    follower_count = serializers.SerializerMethodField()
+    followers_count = serializers.SerializerMethodField()
     following_count = serializers.SerializerMethodField()
     phone = serializers.CharField(source='profile.phone', required=False, allow_blank=True)
     location = serializers.CharField(source='profile.location', required=False, allow_blank=True)
@@ -30,7 +30,7 @@ class UserProfileSerializer(serializers.ModelSerializer):
             'avatar_url',
             'social_links',
             'account_privacy',
-            'follower_count',
+            'followers_count',
             'following_count',
             'date_joined',
             'last_active',
@@ -63,7 +63,7 @@ class UserProfileSerializer(serializers.ModelSerializer):
     def get_full_name(self, obj):
         return obj.get_full_name()
 
-    def get_follower_count(self, obj):
+    def get_followers_count(self, obj):
         return obj.followers.count()
 
     def get_following_count(self, obj):
@@ -151,7 +151,7 @@ class UserCreateSerializer(serializers.ModelSerializer):
         return user
 
 class UserPublicProfileSerializer(serializers.ModelSerializer):
-    follower_count = serializers.SerializerMethodField()
+    followers_count = serializers.SerializerMethodField()
     following_count = serializers.SerializerMethodField()
     is_followed = serializers.BooleanField(read_only=True)
     
@@ -159,12 +159,12 @@ class UserPublicProfileSerializer(serializers.ModelSerializer):
         model = User
         fields = [
             'id', 'username', 'first_name', 'last_name', 'email',
-            'avatar_url', 'bio', 'is_followed', 'follower_count',
+            'avatar_url', 'bio', 'is_followed', 'followers_count',
             'following_count'
         ]
         read_only_fields = fields
 
-    def get_follower_count(self, obj):
+    def get_followers_count(self, obj):
         return obj.followers.count()
 
     def get_following_count(self, obj):

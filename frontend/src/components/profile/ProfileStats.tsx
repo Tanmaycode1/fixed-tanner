@@ -4,7 +4,7 @@
 
 interface ProfileStatsProps {
   postCount: number;
-  followerCount: number;
+  followersCount: number;
   followingCount: number;
   onFollowersClick?: () => void;
   onFollowingClick?: () => void;
@@ -13,7 +13,7 @@ interface ProfileStatsProps {
 
 export function ProfileStats({
   postCount,
-  followerCount,
+  followersCount,
   followingCount,
   onFollowersClick,
   onFollowingClick,
@@ -34,7 +34,7 @@ export function ProfileStats({
       <StatItem label="Posts" value={postCount} />
       <StatItem 
         label="Followers" 
-        value={followerCount} 
+        value={followersCount} 
         onClick={!isPublicProfile ? onFollowersClick : undefined} 
       />
       <StatItem 

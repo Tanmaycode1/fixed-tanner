@@ -70,7 +70,7 @@ function OtherProfileContent({ userId }: { userId: string }) {
     }
   }, [userId]);
 
-  const loadSuggestions = async () => {
+  const loadSuggestions = useCallback(async () => {
     try {
       setSuggestionsLoading(true);
       const response = await userApi.getSuggestions();
@@ -82,7 +82,7 @@ function OtherProfileContent({ userId }: { userId: string }) {
     } finally {
       setSuggestionsLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     if (userId) {
@@ -106,7 +106,7 @@ function OtherProfileContent({ userId }: { userId: string }) {
       return {
         ...prev,
         is_followed: isFollowing,
-        followers_count: isFollowing ? prev.follower_count + 1 : prev.follower_count - 1
+        followers_count: isFollowing ? prev.followers_count + 1 : prev.followers_count - 1
       };
     });
   };

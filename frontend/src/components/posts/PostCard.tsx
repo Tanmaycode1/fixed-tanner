@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useRouter } from 'next/navigation';
 import {
@@ -12,6 +12,8 @@ import {
   Copy,
   Trash2,
   Edit2,
+  ChevronRight,
+  Lock,
 } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -83,7 +85,10 @@ const shouldShowMainImage = (post: Post) => {
   return post.type === 'NEWS';
 };
 
-export function PostCard({ post, onPostUpdate, isLandingPage = false }: PostCardProps) {
+// Max description length before adding "Read more"
+const MAX_DESCRIPTION_LENGTH = 150;
+
+export function PostCard({ post, expanded = false, onPostUpdate, isLandingPage = false }: PostCardProps) {
   const router = useRouter();
   const [isLoading, setIsLoading] = useState(false);
   const [showComments, setShowComments] = useState(false);
@@ -102,6 +107,15 @@ export function PostCard({ post, onPostUpdate, isLandingPage = false }: PostCard
   } | null>(null);
   const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
   const [editedContent, setEditedContent] = useState('');
+  const [showFullDescription, setShowFullDescription] = useState(expanded);
+
+  // Check if description is truncated
+  const isTruncatedDescription = localPost.description?.length > MAX_DESCRIPTION_LENGTH;
+  
+  // Get truncated or full description based on state
+  const displayDescription = showFullDescription || expanded 
+    ? localPost.description 
+    : localPost.description?.substring(0, MAX_DESCRIPTION_LENGTH) + '...';
 
   const loadComments = useCallback(async () => {
     try {
@@ -382,6 +396,19 @@ export function PostCard({ post, onPostUpdate, isLandingPage = false }: PostCard
   const postImageUrl = getPostImageUrl(localPost.image_url || localPost.image);
   const audioImageUrl = getPostImageUrl(localPost.cover_image_url || localPost.image_url || localPost.image);
 
+  // Navigate to post detail page
+  const navigateToPostDetail = () => {
+    router.push(`/posts/${localPost.id}`);
+  };
+
+  // Navigate to user profile
+  const navigateToUserProfile = (e: React.MouseEvent) => {
+    e.stopPropagation(); // Prevent the click from bubbling to parent elements
+    if (localPost.author?.id) {
+      router.push(`/profile/${localPost.author.id}`);
+    }
+  };
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
@@ -417,7 +444,10 @@ export function PostCard({ post, onPostUpdate, isLandingPage = false }: PostCard
           
           <div>
             <div className="flex items-center space-x-2">
-              <h3 className="font-semibold text-gray-900 dark:text-white">
+              <h3 
+                className="font-semibold text-gray-900 dark:text-white cursor-pointer hover:underline"
+                onClick={navigateToUserProfile}
+              >
                 @{localPost.author.username}
               </h3>
               <Badge variant="secondary" className={cn(
@@ -433,7 +463,10 @@ export function PostCard({ post, onPostUpdate, isLandingPage = false }: PostCard
               </span>
             </div>
             {(localPost.author.first_name || localPost.author.last_name) && (
-              <p className="text-sm text-gray-600 dark:text-gray-300">
+              <p 
+                className="text-sm text-gray-600 dark:text-gray-300 cursor-pointer hover:text-gray-800 dark:hover:text-gray-200"
+                onClick={navigateToUserProfile}
+              >
                 {[localPost.author.first_name, localPost.author.last_name].filter(Boolean).join(' ')}
               </p>
             )}
@@ -485,9 +518,22 @@ export function PostCard({ post, onPostUpdate, isLandingPage = false }: PostCard
           <h2 className="text-xl font-semibold text-gray-900 dark:text-white leading-tight">
             {localPost.title}
           </h2>
-          <p className="text-gray-600 dark:text-gray-300 leading-relaxed">
-            {localPost.description}
-          </p>
+          <div className="relative">
+            <p className="text-gray-600 dark:text-gray-300 leading-relaxed">
+              {displayDescription}
+            </p>
+            {!expanded && isTruncatedDescription && !showFullDescription && (
+              <div className="mt-2">
+                <Button 
+                  variant="link" 
+                  className="text-blue-500 dark:text-blue-400 p-0 h-auto font-medium flex items-center"
+                  onClick={navigateToPostDetail}
+                >
+                  Read more <ChevronRight className="h-4 w-4 ml-1" />
+                </Button>
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Only show image here for NEWS posts */}
@@ -503,7 +549,7 @@ export function PostCard({ post, onPostUpdate, isLandingPage = false }: PostCard
 
         {/* Audio Player (will handle its own image display) */}
         {localPost.type === 'AUDIO' && (
-          <div className="mt-4">
+          <div className="mt-4 relative">
             <AudioPlayer
               audioUrl={localPost.audio_url || ''}
               coverImage={audioImageUrl}

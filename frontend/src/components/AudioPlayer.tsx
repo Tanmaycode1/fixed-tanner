@@ -9,7 +9,8 @@ import {
   Rewind,
   Forward,
   ListMusic,
-  MoreHorizontal
+  MoreHorizontal,
+  Lock
 } from 'lucide-react';
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
@@ -29,6 +30,9 @@ interface AudioPlayerProps {
   post?: any;
 }
 
+// Maximum playback time in seconds (1 minute)
+const MAX_PLAYBACK_TIME = 60;
+
 export function AudioPlayer({
   audioUrl,
   coverImage,
@@ -45,13 +49,16 @@ export function AudioPlayer({
   const [duration, setDuration] = useState(0);
   const [currentTime, setCurrentTime] = useState(0);
   const [isLoaded, setIsLoaded] = useState(false);
+  const [timeRemaining, setTimeRemaining] = useState(MAX_PLAYBACK_TIME);
+  const [isPremiumLimited, setIsPremiumLimited] = useState(false);
   
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const animationRef = useRef<number | null>(null);
+  const timerRef = useRef<NodeJS.Timeout | null>(null);
 
   // Use useCallback for functions that use refs
   const play = useCallback(async () => {
-    if (audioRef.current) {
+    if (audioRef.current && !isPremiumLimited) {
       try {
         await audioRef.current.play();
         setIsPlaying(true);
@@ -59,7 +66,7 @@ export function AudioPlayer({
         console.error('Error playing audio:', error);
       }
     }
-  }, []);
+  }, [isPremiumLimited]);
 
   const pause = useCallback(() => {
     if (audioRef.current) {
@@ -68,12 +75,43 @@ export function AudioPlayer({
     }
   }, []);
 
+  // Start the countdown timer
+  const startTimer = useCallback(() => {
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+    }
+
+    timerRef.current = setInterval(() => {
+      setTimeRemaining(prev => {
+        const newTime = prev - 1;
+        if (newTime <= 0) {
+          // Time's up - handle premium limit
+          if (timerRef.current) clearInterval(timerRef.current);
+          setIsPremiumLimited(true);
+          pause();
+          return 0;
+        }
+        return newTime;
+      });
+    }, 1000);
+  }, [pause]);
+
+  // Stop the countdown timer
+  const stopTimer = useCallback(() => {
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+  }, []);
+
+  // Effect to handle volume change
   useEffect(() => {
     if (audioRef.current) {
       audioRef.current.volume = volume;
     }
   }, [volume]);
 
+  // Effect to load audio when URL changes
   useEffect(() => {
     if (!audioUrl) return;
 
@@ -84,7 +122,9 @@ export function AudioPlayer({
         setIsLoaded(false);
         setIsPlaying(false);
         setCurrentTime(0);
-        setDuration(0);
+        setTimeRemaining(MAX_PLAYBACK_TIME);
+        setIsPremiumLimited(false);
+        setDuration(MAX_PLAYBACK_TIME); // Always set duration to 1 minute
 
         audioRef.current.src = audioUrl;
         audioRef.current.load();
@@ -108,16 +148,19 @@ export function AudioPlayer({
         audioRef.current.pause();
         audioRef.current.src = '';
       }
+      stopTimer();
     };
-  }, [audioUrl]);
+  }, [audioUrl, stopTimer]);
 
+  // Effect to clean up animation frame
   useEffect(() => {
     return () => {
       if (animationRef.current) {
         cancelAnimationFrame(animationRef.current);
       }
+      stopTimer();
     };
-  }, []);
+  }, [stopTimer]);
 
   const formatTime = (time: number) => {
     if (!isFinite(time)) return '0:00';
@@ -127,16 +170,18 @@ export function AudioPlayer({
   };
 
   const handlePlayPause = async () => {
-    if (!isLoaded || !audioRef.current) return;
+    if (!isLoaded || !audioRef.current || isPremiumLimited) return;
     
     try {
       if (isPlaying) {
         await audioRef.current.pause();
+        stopTimer();
       } else {
         if (audioRef.current.ended) {
           audioRef.current.currentTime = 0;
         }
         await audioRef.current.play();
+        startTimer();
       }
       setIsPlaying(!isPlaying);
     } catch (error) {
@@ -148,33 +193,35 @@ export function AudioPlayer({
   const handleTimeUpdate = () => {
     if (audioRef.current) {
       const time = audioRef.current.currentTime;
-      const audioDuration = audioRef.current.duration;
       
-      if (isFinite(time) && isFinite(audioDuration)) {
-        setCurrentTime(time);
-        setDuration(audioDuration); // Update duration continuously
+      // Check if we've reached the premium limit
+      if (time >= MAX_PLAYBACK_TIME && !isPremiumLimited) {
+        setIsPremiumLimited(true);
+        pause();
+        stopTimer();
+        setTimeRemaining(0);
         
-        if (onProgress) {
-          onProgress(time / audioDuration);
-        }
-
-        // Check if we reached the end
-        if (time >= audioDuration) {
-          setIsPlaying(false);
-          if (onEnded) onEnded();
-        }
+        // Notify about premium limit
+        if (onEnded) onEnded();
+      }
+      
+      // Update current time (capped at MAX_PLAYBACK_TIME)
+      const cappedTime = Math.min(time, MAX_PLAYBACK_TIME);
+      setCurrentTime(cappedTime);
+      
+      // Call progress callback
+      if (onProgress) {
+        onProgress(cappedTime / MAX_PLAYBACK_TIME);
       }
     }
   };
 
   const handleLoadedMetadata = () => {
     if (audioRef.current) {
-      const audioDuration = audioRef.current.duration;
-      if (isFinite(audioDuration)) {
-        setDuration(audioDuration);
-        setIsLoaded(true);
-        audioRef.current.preload = 'auto';
-      }
+      // Always set display duration to 1 minute
+      setDuration(MAX_PLAYBACK_TIME);
+      setIsLoaded(true);
+      audioRef.current.preload = 'auto';
     }
   };
 
@@ -189,13 +236,17 @@ export function AudioPlayer({
 
   const handleProgressChange = (value: number[]) => {
     const newTime = value[0];
-    if (!isFinite(newTime)) return;
+    if (!isFinite(newTime) || isPremiumLimited) return;
     
-    if (audioRef.current && isFinite(audioRef.current.duration)) {
+    if (audioRef.current) {
       try {
-        const clampedTime = Math.max(0, Math.min(newTime, audioRef.current.duration));
+        // Clamp to MAX_PLAYBACK_TIME
+        const clampedTime = Math.max(0, Math.min(newTime, MAX_PLAYBACK_TIME));
         audioRef.current.currentTime = clampedTime;
         setCurrentTime(clampedTime);
+        
+        // Update time remaining
+        setTimeRemaining(MAX_PLAYBACK_TIME - clampedTime);
       } catch (error) {
         console.error('Error setting audio time:', error);
       }
@@ -210,8 +261,11 @@ export function AudioPlayer({
   };
 
   const skip = (seconds: number) => {
-    if (audioRef.current) {
-      audioRef.current.currentTime += seconds;
+    if (audioRef.current && !isPremiumLimited) {
+      const newTime = audioRef.current.currentTime + seconds;
+      const clampedTime = Math.max(0, Math.min(newTime, MAX_PLAYBACK_TIME));
+      audioRef.current.currentTime = clampedTime;
+      setTimeRemaining(MAX_PLAYBACK_TIME - clampedTime);
     }
   };
 
@@ -232,8 +286,26 @@ export function AudioPlayer({
       "bg-gradient-to-br from-slate-100 to-white dark:from-slate-900 dark:to-slate-800",
       "border border-slate-200 dark:border-slate-700/50",
       "shadow-xl shadow-slate-200/20 dark:shadow-slate-900/20",
+      "relative",
       className
     )}>
+      {/* Premium limit overlay */}
+      {isPremiumLimited && (
+        <div className="absolute inset-0 bg-blue-900/80 z-20 flex flex-col items-center justify-center rounded-xl text-white p-6">
+          <Lock className="h-10 w-10 mb-3 text-blue-300" />
+          <h3 className="font-bold text-xl text-center text-blue-100">Premium Content</h3>
+          <p className="text-center text-sm mt-2 mb-4 text-blue-200">
+            You've reached the 1-minute free preview limit. Upgrade to continue listening.
+          </p>
+          <Button 
+            className="bg-gradient-to-r from-blue-500 to-blue-600 text-white hover:from-blue-600 hover:to-blue-700"
+            onClick={() => toast.success('Upgrade feature coming soon!')}
+          >
+            Upgrade to Premium
+          </Button>
+        </div>
+      )}
+
       {/* Cover image for audio */}
       {coverImage && (
         <div className="relative w-full aspect-video">
@@ -270,19 +342,30 @@ export function AudioPlayer({
           </p>
         </div>
 
+        {/* Timer Display */}
+        <div className="mb-2 flex justify-end">
+          <span className="text-xs font-mono px-2 py-1 bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300 rounded-full">
+            {formatTime(timeRemaining)} remaining
+          </span>
+        </div>
+
         {/* Progress Bar */}
         <div className="mb-4 space-y-2">
           <Slider
             value={[currentTime]}
             min={0}
-            max={duration || 100}
+            max={MAX_PLAYBACK_TIME} // Always set max to 1 minute
             step={0.1}
             onValueChange={handleProgressChange}
-            className="cursor-pointer"
+            className={cn(
+              "cursor-pointer",
+              isPremiumLimited && "opacity-50 cursor-not-allowed"
+            )}
+            disabled={isPremiumLimited}
           />
           <div className="flex justify-between text-xs text-slate-500 dark:text-slate-400">
             <span>{formatTime(currentTime)}</span>
-            <span>{formatTime(duration)}</span>
+            <span>{formatTime(MAX_PLAYBACK_TIME)}</span> {/* Always show 1 minute as max duration */}
           </div>
         </div>
 
@@ -294,6 +377,7 @@ export function AudioPlayer({
               size="icon"
               onClick={() => skip(-10)}
               className="text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white"
+              disabled={isPremiumLimited}
             >
               <Rewind className="h-5 w-5" />
             </Button>
@@ -301,12 +385,12 @@ export function AudioPlayer({
             <Button
               size="icon"
               onClick={handlePlayPause}
-              disabled={!isLoaded}
+              disabled={!isLoaded || isPremiumLimited}
               className={cn(
                 "h-10 w-10 rounded-xl",
-                "bg-gradient-to-br from-violet-500 to-violet-600",
-                "hover:from-violet-600 hover:to-violet-700",
-                "text-white shadow-lg shadow-violet-500/25",
+                "bg-gradient-to-br from-blue-500 to-blue-600",
+                "hover:from-blue-600 hover:to-blue-700",
+                "text-white shadow-lg shadow-blue-500/25",
                 "disabled:opacity-50 disabled:cursor-not-allowed"
               )}
             >
@@ -322,6 +406,7 @@ export function AudioPlayer({
               size="icon"
               onClick={() => skip(10)}
               className="text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white"
+              disabled={isPremiumLimited}
             >
               <Forward className="h-5 w-5" />
             </Button>
@@ -333,6 +418,7 @@ export function AudioPlayer({
               size="icon"
               onClick={toggleMute}
               className="text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white"
+              disabled={isPremiumLimited}
             >
               {isMuted ? (
                 <VolumeX className="h-5 w-5" />
@@ -348,6 +434,7 @@ export function AudioPlayer({
                 max={100}
                 step={1}
                 onValueChange={handleVolumeChange}
+                disabled={isPremiumLimited}
               />
             </div>
 
@@ -355,6 +442,7 @@ export function AudioPlayer({
               variant="ghost"
               size="icon"
               className="text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white"
+              disabled={isPremiumLimited}
             >
               <ListMusic className="h-5 w-5" />
             </Button>
@@ -363,6 +451,7 @@ export function AudioPlayer({
               variant="ghost"
               size="icon"
               className="text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white"
+              disabled={isPremiumLimited}
             >
               <MoreHorizontal className="h-5 w-5" />
             </Button>
@@ -376,6 +465,7 @@ export function AudioPlayer({
         onLoadedMetadata={handleLoadedMetadata}
         onEnded={() => {
           setIsPlaying(false);
+          stopTimer();
           if (onEnded) onEnded();
         }}
         onError={(e: React.SyntheticEvent<HTMLAudioElement, Event>) => handleAudioError(e.nativeEvent)}

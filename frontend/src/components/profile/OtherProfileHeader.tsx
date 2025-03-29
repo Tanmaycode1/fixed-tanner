@@ -73,7 +73,7 @@ export function OtherProfileHeader({
                     username={profile.username}
                     isFollowing={profile.is_followed ?? false}
                     onFollowChange={onFollowChange ?? (() => {})}
-                    className="w-32 bg-primary hover:bg-primary/90 text-white shadow-lg rounded-full"
+                    className="w-32 bg-blue-600 hover:bg-blue-700 text-white shadow-md hover:shadow-lg rounded-full font-medium"
                   />
                 </motion.div>
               </div>
@@ -87,7 +87,7 @@ export function OtherProfileHeader({
                   username={profile.username}
                   isFollowing={profile.is_followed ?? false}
                   onFollowChange={onFollowChange ?? (() => {})}
-                  className="w-28 bg-primary hover:bg-primary/90 text-white shadow-lg rounded-full"
+                  className="w-28 bg-blue-600 hover:bg-blue-700 text-white shadow-md hover:shadow-lg rounded-full font-medium"
                 />
               </motion.div>
             </div>
@@ -118,7 +118,7 @@ export function OtherProfileHeader({
             <div className="flex justify-center sm:justify-start mt-4">
               <ProfileStats
                 postCount={profile.post_count || 0}
-                followerCount={profile.follower_count}
+                followerCount={profile.followers_count}
                 followingCount={profile.following_count}
                 onFollowersClick={onFollowersClick}
                 onFollowingClick={onFollowingClick}

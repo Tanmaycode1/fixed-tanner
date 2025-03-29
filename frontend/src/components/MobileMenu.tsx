@@ -34,29 +34,20 @@ const MobileMenu = () => {
               <ul className="space-y-4">
                 <li>
                   <Link 
+                    href="/"
+                    className="block text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white"
+                    onClick={() => setIsOpen(false)}
+                  >
+                    Home
+                  </Link>
+                </li>
+                <li>
+                  <Link 
                     href="/about"
                     className="block text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white"
                     onClick={() => setIsOpen(false)}
                   >
                     About
-                  </Link>
-                </li>
-                <li>
-                  <Link 
-                    href="/features"
-                    className="block text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white"
-                    onClick={() => setIsOpen(false)}
-                  >
-                    Features
-                  </Link>
-                </li>
-                <li>
-                  <Link 
-                    href="/pricing"
-                    className="block text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white"
-                    onClick={() => setIsOpen(false)}
-                  >
-                    Pricing
                   </Link>
                 </li>
                 <li>

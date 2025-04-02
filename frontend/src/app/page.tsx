@@ -13,6 +13,7 @@ import { Card } from '@/components/ui/card';
 import { postsApi } from '@/services/postsApi';
 import type { Post } from '@/services/postsApi';
 import { PublicPostCard } from '@/components/posts/PublicPostCard';
+import Image from 'next/image';
 
 const FloatingElement = ({ children, delay = 0 }: { children: React.ReactNode; delay?: number }) => {
   return (
@@ -128,7 +129,9 @@ export default function Home() {
                   transition={{ type: "spring", duration: 1 }}
                   className="inline-flex items-center justify-center mb-8 bg-white/10 dark:bg-white/5 backdrop-blur-lg rounded-2xl p-4 relative z-20"
                 >
-                  <BookOpen className="h-8 w-8 text-[#38BDF8]" />
+                  <div className="relative w-8 h-8">
+                    <Image src="/favicon.jpeg" alt="Neuhu" fill className="object-contain" />
+                  </div>
                   <span className="text-2xl font-bold bg-gradient-to-r from-[#38BDF8] to-[#0EA5E9] bg-clip-text text-transparent ml-2">
                     Neuhu
                   </span>
@@ -143,11 +146,11 @@ export default function Home() {
                 <motion.h1 
                   className="text-5xl md:text-7xl font-bold leading-tight tracking-tight text-black dark:text-white"
                 >
-                  Share Your 
+                  Share
                   Knowledge
                   <div className="relative mt-4">
                     <span className="block text-[#38BDF8]">
-                      Inspire Others
+                      Inspire the World
                     </span>
                     <motion.div
                       className="absolute -right-16 -top-16"
@@ -166,8 +169,7 @@ export default function Home() {
                 transition={{ delay: 0.5 }}
                 className="text-xl md:text-2xl text-gray-600 dark:text-gray-300 mb-12 leading-relaxed"
               >
-                Neuhu delivers business, markets expert news, analysis, and audios to the world, 
-                featuring stories from global experts.
+                Listen to what experts are saying
               </motion.p>
 
               {/* Stats Section */}

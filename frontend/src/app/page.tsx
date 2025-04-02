@@ -123,61 +123,45 @@ export default function Home() {
         >
           <div className="container px-4">
             <div className="max-w-4xl mx-auto text-center mt-24 md:mt-0">
-                              <motion.div 
-                  initial={{ opacity: 0, scale: 0 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  transition={{ type: "spring", duration: 1 }}
-                  className="inline-flex items-center justify-center mb-8 bg-white/10 dark:bg-white/5 backdrop-blur-lg rounded-2xl p-4 relative z-20"
-                >
-                  <div className="relative w-8 h-8">
-                    <Image src="/favicon.jpeg" alt="Neuhu" fill className="object-contain" />
-                  </div>
-                  <span className="text-2xl font-bold bg-gradient-to-r from-[#38BDF8] to-[#0EA5E9] bg-clip-text text-transparent ml-2">
-                    Neuhu
-                  </span>
-                </motion.div>
-              
+              <motion.div 
+                initial={{ opacity: 0, scale: 0 }}
+                animate={{ opacity: 1, scale: 1 }}
+                transition={{ type: "spring", duration: 1 }}
+                className="inline-flex items-center justify-center mb-8 bg-white/10 dark:bg-white/5 backdrop-blur-lg rounded-2xl p-4 relative z-20"
+              >
+                <span className="text-4xl md:text-5xl font-bold bg-gradient-to-r from-[#38BDF8] to-[#0EA5E9] bg-clip-text text-transparent">
+                  Neuhu
+                </span>
+              </motion.div>
+            
               <motion.div
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.3 }}
-                className="relative mb-8"
+                className="relative mb-16"
               >
                 <motion.h1 
-                  className="text-5xl md:text-7xl font-bold leading-tight tracking-tight text-black dark:text-white"
+                  className="text-5xl md:text-7xl font-bold leading-tight tracking-tight"
                 >
-                  Share
-                  Knowledge
-                  <div className="relative mt-4">
-                    <span className="block text-[#38BDF8]">
-                      Inspire the World
-                    </span>
-                    <motion.div
-                      className="absolute -right-16 -top-16"
-                      animate={{ rotate: 360 }}
-                      transition={{ duration: 20, repeat: Infinity, ease: "linear" }}
-                    >
-                      <Sparkles className="h-10 w-10 text-[#38BDF8]" />
-                    </motion.div>
-                  </div>
+                  <span className="text-black dark:text-white">Share Knowledge,</span>
+                  <span className="text-[#38BDF8] block md:inline"> Inspire the World,</span>
+                  <span className="text-black dark:text-white block md:inline"> Listen to what experts are saying</span>
+                  <motion.div
+                    className="absolute -right-16 -top-16"
+                    animate={{ rotate: 360 }}
+                    transition={{ duration: 20, repeat: Infinity, ease: "linear" }}
+                  >
+                    <Sparkles className="h-10 w-10 text-[#38BDF8]" />
+                  </motion.div>
                 </motion.h1>
               </motion.div>
               
-              <motion.p 
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                transition={{ delay: 0.5 }}
-                className="text-xl md:text-2xl text-gray-600 dark:text-gray-300 mb-12 leading-relaxed"
-              >
-                Listen to what experts are saying
-              </motion.p>
-
               {/* Stats Section */}
               <motion.div 
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.7 }}
-                className="grid grid-cols-3 gap-8 mb-12"
+                className="grid grid-cols-3 gap-12 mb-12"
               >
                 {stats.map((stat, index) => (
                   <FloatingElement key={stat.label} delay={index * 0.2}>

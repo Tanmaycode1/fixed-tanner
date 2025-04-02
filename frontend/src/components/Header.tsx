@@ -4,7 +4,6 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { motion } from 'framer-motion';
 import MobileMenu from './MobileMenu';
-import ThemeToggle from './ThemeToggle';
 
 const Header = () => {
   return (
@@ -31,7 +30,6 @@ const Header = () => {
           </div>
 
           <div className="flex items-center space-x-4">
-            <ThemeToggle />
             <Link 
               href="/auth/login"
               className="px-4 py-2 text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white transition-colors"

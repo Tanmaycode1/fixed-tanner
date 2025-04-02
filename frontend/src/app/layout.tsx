@@ -10,6 +10,14 @@ const inter = Inter({ subsets: ['latin'] })
 export const metadata: Metadata = {
   title: 'Neuhu - Expert Business News & Analysis',
   description: 'Neuhu delivers business, markets expert news, analysis, and audios to the world, featuring stories from global experts.',
+  icons: {
+    icon: [
+      {
+        url: '/favicon.jpeg',
+        href: '/favicon.jpeg',
+      }
+    ]
+  }
 }
 
 export default function RootLayout({

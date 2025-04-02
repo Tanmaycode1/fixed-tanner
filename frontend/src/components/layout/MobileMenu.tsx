@@ -3,6 +3,7 @@
 import { motion, AnimatePresence } from "framer-motion";
 import { X } from "lucide-react";
 import Link from "next/link";
+import Image from "next/image";
 import { Button } from "@/components/ui/button";
 
 interface MobileMenuProps {
@@ -41,7 +42,12 @@ export function MobileMenu({ isOpen, onClose }: MobileMenuProps) {
           >
             <div className="flex flex-col h-full">
               <div className="flex items-center justify-between p-4 border-b">
-                <h2 className="font-semibold">Menu</h2>
+                <div className="flex items-center gap-2">
+                  <div className="relative w-5 h-5">
+                    <Image src="/favicon.jpeg" alt="Neuhu" fill className="object-contain" />
+                  </div>
+                  <h2 className="font-semibold">Menu</h2>
+                </div>
                 <Button variant="ghost" size="icon" onClick={onClose}>
                   <X className="h-4 w-4" />
                 </Button>

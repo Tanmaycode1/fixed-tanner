@@ -1,6 +1,7 @@
 "use client";
 
 import Link from 'next/link';
+import Image from 'next/image';
 import { motion } from 'framer-motion';
 import MobileMenu from './MobileMenu';
 import ThemeToggle from './ThemeToggle';
@@ -11,6 +12,9 @@ const Header = () => {
       <nav className="container mx-auto px-4 py-4">
         <div className="flex items-center justify-between">
           <Link href="/" className="flex items-center space-x-2">
+            <div className="relative w-8 h-8">
+              <Image src="/favicon.jpeg" alt="Neuhu" fill className="object-contain" />
+            </div>
             <motion.div
               initial={{ scale: 0.8 }}
               animate={{ scale: 1 }}

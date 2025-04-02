@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
+import Image from 'next/image';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Bars3Icon, XMarkIcon } from '@heroicons/react/24/outline';
 
@@ -31,6 +32,12 @@ const MobileMenu = () => {
             className="absolute top-16 left-0 right-0 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 py-4"
           >
             <nav className="container mx-auto px-4">
+              <div className="flex items-center mb-4">
+                <div className="relative w-6 h-6">
+                  <Image src="/favicon.jpeg" alt="Neuhu" fill className="object-contain" />
+                </div>
+                <span className="ml-2 font-semibold text-gray-900 dark:text-white">Neuhu</span>
+              </div>
               <ul className="space-y-4">
                 <li>
                   <Link 

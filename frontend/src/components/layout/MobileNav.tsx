@@ -1,6 +1,7 @@
 "use client";
 
 import Link from 'next/link';
+import Image from 'next/image';
 import { usePathname } from 'next/navigation';
 import { motion } from 'framer-motion';
 import { 
@@ -56,6 +57,18 @@ export function MobileNav() {
       {/* Navigation */}
       <nav className="bg-white/80 dark:bg-gray-900/80 backdrop-blur-lg border-t border-gray-200 dark:border-gray-800">
         <div className="max-w-screen-xl mx-auto">
+          {/* Show logo and title in mobile nav */}
+          <div className="flex items-center justify-center pt-1 pb-0.5">
+            <Link href="/dashboard" className="flex items-center gap-2">
+              <div className="relative w-5 h-5">
+                <Image src="/favicon.jpeg" alt="Neuhu" fill className="object-contain" />
+              </div>
+              <span className="text-sm font-semibold text-gray-800 dark:text-white">
+                Dashboard
+              </span>
+            </Link>
+          </div>
+          
           <div className="flex items-center justify-around px-4 py-2">
             {navigationItems.map((item) => {
               const isActive = pathname === item.href;

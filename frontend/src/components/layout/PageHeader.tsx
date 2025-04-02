@@ -6,6 +6,7 @@ import { ChevronLeft } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { MobileMenu } from "@/components/layout/MobileMenu";
+import Image from "next/image";
 
 interface PageHeaderProps {
   title: string;
@@ -32,7 +33,12 @@ export function PageHeader({ title, showBack = true }: PageHeaderProps) {
                 <ChevronLeft className="h-4 w-4" />
               </Button>
             )}
-            <h1 className="text-lg font-semibold">{title}</h1>
+            <div className="flex items-center gap-2">
+              <div className="relative w-5 h-5">
+                <Image src="/favicon.jpeg" alt="Neuhu" fill className="object-contain" />
+              </div>
+              <h1 className="text-lg font-semibold">{title}</h1>
+            </div>
           </div>
           <div className="flex items-center gap-2">
             {/* <Button

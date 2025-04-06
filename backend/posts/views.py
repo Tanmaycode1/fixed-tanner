@@ -1,8 +1,8 @@
 from django.shortcuts import render, get_object_or_404
 from rest_framework import viewsets, status, filters
-from rest_framework.decorators import action
+from rest_framework.decorators import action, permission_classes
 from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated, AllowAny
+from rest_framework.permissions import IsAuthenticated, AllowAny, IsAdminUser
 from django_filters.rest_framework import DjangoFilterBackend
 from django.core.exceptions import ValidationError
 from django.db.models import F, Count, ExpressionWrapper, FloatField, Case, When, Exists, OuterRef, Q
@@ -204,77 +204,113 @@ class PostViewSet(BaseViewSet):
         instance.delete()
 
     @action(detail=False, methods=['get'])
-    @method_decorator(cache_page(300))  # Cache for 5 minutes
     def feed(self, request):
-        """Enhanced personalized feed with support for unauthenticated users"""
+        """
+        Advanced personalized feed with multiple sections and infinite scrolling support.
+        
+        Query parameters:
+        - page: Page number (default: 1)
+        - section: One of 'following', 'recommended', 'trending', 'discover', 'all' (default: 'all')
+        - limit: Number of posts per section (default: 10)
+        - personalize: Whether to apply user preferences (default: True)
+        """
         try:
-            # Get base queryset
-            queryset = self.get_queryset()
-            feed_posts = None
-
-            if request.user.is_authenticated:
-                # First try: Get posts from followed users (higher weight)
-                following_posts = queryset.filter(
-                    author__in=request.user.following.all()
-                ).annotate(
-                    relevance_score=ExpressionWrapper(
-                        (F('trending_score__score') * 1.5) +
-                        (F('likes_count') * 0.5) +
-                        (F('comments_count') * 0.3) +
-                        Case(
-                            When(created_at__gte=timezone.now() - timedelta(days=1), then=10),
-                            When(created_at__gte=timezone.now() - timedelta(days=7), then=5),
-                            default=1,
-                            output_field=FloatField(),
-                        ),
-                        output_field=FloatField()
-                    )
-                )
-                
-                if following_posts.exists():
-                    feed_posts = following_posts.order_by('-relevance_score', '-created_at')
+            # Get query parameters
+            page = int(request.query_params.get('page', 1))
+            section = request.query_params.get('section', 'all').lower()
+            limit_per_section = min(int(request.query_params.get('limit', 10)), 50)  # Cap at 50
+            personalize = request.query_params.get('personalize', 'true').lower() == 'true'
             
-            if not feed_posts or not feed_posts.exists():
-                # Second try: Get trending posts
-                trending_posts = queryset.filter(
-                    trending_score__score__gt=0
-                ).annotate(
-                    relevance_score=ExpressionWrapper(
-                        (F('trending_score__score') * 1.0) +
-                        (F('likes_count') * 0.3) +
-                        (F('comments_count') * 0.2) +
-                        Case(
-                            When(created_at__gte=timezone.now() - timedelta(days=1), then=5),
-                            When(created_at__gte=timezone.now() - timedelta(days=7), then=3),
-                            default=1,
-                            output_field=FloatField(),
-                        ),
-                        output_field=FloatField()
-                    )
-                )
-                
-                if trending_posts.exists():
-                    feed_posts = trending_posts.order_by('-relevance_score', '-created_at')
-                else:
-                    # Final fallback: Get most recent posts
-                    feed_posts = queryset.order_by('-created_at')
+            # Determine if we need debug info
+            debug_mode = request.query_params.get('debug', 'false').lower() == 'true'
 
-            # Paginate results
-            page = self.paginate_queryset(feed_posts)
-            if page is not None:
-                serializer = self.get_serializer(page, many=True)
-                return self.get_paginated_response(serializer.data)
-
-            serializer = self.get_serializer(feed_posts, many=True)
-            return Response({
+            # Base queryset
+            queryset = self.get_queryset()
+            
+            # Initialize result sections and metadata
+            result_data = {
                 'success': True,
                 'data': {
-                    'results': serializer.data,
-                    'count': len(serializer.data)
+                    'sections': {},
+                    'metadata': {
+                        'has_more': False,
+                        'current_page': page,
+                        'sections_included': []
+                    }
                 }
-            })
+            }
+            
+            # Get user content preferences if authenticated and personalization is enabled
+            user_preferences = None
+            interest_graph = None
+            if request.user.is_authenticated and personalize:
+                from .models import UserContentPreference, UserInterestGraph
+                user_preferences = UserContentPreference.get_or_create_for_user(request.user)
+                interest_graph = UserInterestGraph.get_or_create_for_user(request.user)
+            
+            # Calculate offsets for pagination
+            offset = (page - 1) * limit_per_section
+            
+            # Add sections based on request
+            sections_to_include = []
+            if section == 'all':
+                if request.user.is_authenticated:
+                    sections_to_include = ['following', 'recommended', 'trending', 'discover']
+                else:
+                    sections_to_include = ['trending', 'discover']
+            else:
+                sections_to_include = [section]
+            
+            # Keep track of seen post IDs to avoid duplicates across sections
+            seen_post_ids = set()
+            
+            # Add posts for each requested section
+            for current_section in sections_to_include:
+                # Skip sections that don't apply to unauthenticated users
+                if not request.user.is_authenticated and current_section in ['following', 'recommended']:
+                    continue
+                
+                section_posts, has_more = self._get_section_posts(
+                    request=request,
+                    queryset=queryset,
+                    section=current_section,
+                    limit=limit_per_section,
+                    offset=offset,
+                    user_preferences=user_preferences,
+                    interest_graph=interest_graph,
+                    seen_post_ids=seen_post_ids,
+                    debug_mode=debug_mode
+                )
+                
+                if section_posts:
+                    serializer = self.get_serializer(section_posts, many=True)
+                    result_data['data']['sections'][current_section] = serializer.data
+                    result_data['data']['sections_included'].append(current_section)
+                    result_data['data']['metadata']['has_more'] = result_data['data']['metadata']['has_more'] or has_more
+                    
+                    # Add seen posts to avoid duplicates
+                    seen_post_ids.update([post.id for post in section_posts])
+            
+            # Add total counts by section to metadata
+            if request.user.is_authenticated:
+                result_data['data']['metadata']['counts'] = {
+                    'following': queryset.filter(author__in=request.user.following.all()).count() if 'following' in sections_to_include else 0,
+                    'recommended': min(500, queryset.count()) if 'recommended' in sections_to_include else 0,  # Estimate
+                    'trending': queryset.filter(trending_score__score__gt=0).count() if 'trending' in sections_to_include else 0,
+                    'discover': queryset.count() if 'discover' in sections_to_include else 0,
+                }
+            else:
+                result_data['data']['metadata']['counts'] = {
+                    'trending': queryset.filter(trending_score__score__gt=0).count() if 'trending' in sections_to_include else 0,
+                    'discover': queryset.count() if 'discover' in sections_to_include else 0,
+                }
+            
+            return Response(result_data)
+            
         except Exception as e:
-            print(f"Feed Error: {str(e)}")  # Debug log
+            import traceback
+            print(f"Feed Error: {str(e)}")
+            print(traceback.format_exc())
             # Ultimate fallback: Get any recent posts
             try:
                 fallback_posts = self.get_queryset().order_by('-created_at')[:10]
@@ -282,8 +318,14 @@ class PostViewSet(BaseViewSet):
                 return Response({
                     'success': True,
                     'data': {
-                        'results': serializer.data,
-                        'count': len(serializer.data)
+                        'sections': {
+                            'fallback': serializer.data
+                        },
+                        'metadata': {
+                            'has_more': fallback_posts.count() > 0,
+                            'current_page': 1,
+                            'sections_included': ['fallback']
+                        }
                     }
                 })
             except Exception as inner_e:
@@ -291,6 +333,230 @@ class PostViewSet(BaseViewSet):
                     'success': False,
                     'error': str(inner_e)
                 }, status=status.HTTP_400_BAD_REQUEST)
+    
+    def _get_section_posts(self, request, queryset, section, limit, offset, 
+                          user_preferences=None, interest_graph=None, 
+                          seen_post_ids=None, debug_mode=False):
+        """Helper method to get posts for a specific feed section with scoring"""
+        from django.db.models import Case, When, Value, FloatField, F, ExpressionWrapper
+        from django.db.models.functions import Cast
+        from django.utils import timezone
+        from datetime import timedelta
+        import random
+        
+        if seen_post_ids is None:
+            seen_post_ids = set()
+        
+        # Exclude posts already seen in other sections
+        if seen_post_ids:
+            queryset = queryset.exclude(id__in=seen_post_ids)
+        
+        # Add debug fields if requested
+        debug_fields = {}
+        if debug_mode:
+            debug_fields = {
+                'base_score': 0.0,
+                'recency_score': 0.0,
+                'interaction_score': 0.0,
+                'relevance_score': 0.0,
+                'personalization_score': 0.0,
+                'final_score': 0.0,
+            }
+        
+        # Different scoring logic based on section
+        if section == 'following':
+            # Posts from users the current user follows
+            if not request.user.is_authenticated:
+                return [], False
+                
+            # Base queryset: posts from followed users
+            section_queryset = queryset.filter(author__in=request.user.following.all())
+            
+            # Apply personalization if available
+            personalization_expr = Value(1.0, output_field=FloatField())
+            if user_preferences:
+                # Boost posts matching user tag preferences
+                personalization_expr = Case(
+                    *[
+                        When(
+                            tags__name=tag_name, 
+                            then=Value(tag_weight / 100.0)
+                        ) 
+                        for tag_name, tag_weight in user_preferences.tag_preferences.items()
+                    ],
+                    default=Value(0.5),
+                    output_field=FloatField()
+                )
+                
+                # Boost post types based on preferences
+                personalization_expr = ExpressionWrapper(
+                    personalization_expr * Case(
+                        When(type='NEWS', then=Value(user_preferences.news_preference / 50.0)),
+                        When(type='AUDIO', then=Value(user_preferences.audio_preference / 50.0)),
+                        default=Value(1.0),
+                        output_field=FloatField()
+                    ),
+                    output_field=FloatField()
+                )
+            
+            # Prepare annotations
+            section_queryset = section_queryset.annotate(
+                # Base score (interactions)
+                base_score=ExpressionWrapper(
+                    (Cast('likes_count', FloatField()) * 1.0) +
+                    (Cast('comments_count', FloatField()) * 2.0),
+                    output_field=FloatField()
+                ),
+                
+                # Recency score
+                recency_score=Case(
+                    When(created_at__gte=timezone.now() - timedelta(hours=24), then=Value(20.0)),
+                    When(created_at__gte=timezone.now() - timedelta(hours=48), then=Value(15.0)),
+                    When(created_at__gte=timezone.now() - timedelta(days=7), then=Value(10.0)),
+                    When(created_at__gte=timezone.now() - timedelta(days=30), then=Value(5.0)),
+                    default=Value(1.0),
+                    output_field=FloatField()
+                ),
+                
+                # Interaction score
+                interaction_score=ExpressionWrapper(
+                    F('trending_score__score') * 2.0,
+                    output_field=FloatField()
+                ),
+                
+                # Personalization score
+                personalization_score=personalization_expr
+            )
+            
+            # Combine all scores for final ranking
+            section_queryset = section_queryset.annotate(
+                final_score=ExpressionWrapper(
+                    (F('base_score') * 0.3) +
+                    (F('recency_score') * 0.4) +
+                    (F('interaction_score') * 0.2) +
+                    (F('personalization_score') * 0.1),
+                    output_field=FloatField()
+                )
+            )
+            
+            # Order by final score
+            section_queryset = section_queryset.order_by('-final_score', '-created_at')
+        
+        elif section == 'recommended':
+            # Personalized recommendations based on user interest graph
+            if not request.user.is_authenticated:
+                return [], False
+                
+            # Base posts from users in the interest graph
+            related_user_ids = []
+            if interest_graph and interest_graph.interest_graph:
+                # Sort by weight and take top 50
+                sorted_interests = sorted(
+                    interest_graph.interest_graph.items(), 
+                    key=lambda x: x[1], 
+                    reverse=True
+                )[:50]
+                related_user_ids = [uid for uid, _ in sorted_interests]
+            
+            # If we have related users, prioritize their content
+            if related_user_ids:
+                # Create a Case expression for boosting posts from interested users
+                interest_boosts = []
+                for i, user_id in enumerate(related_user_ids):
+                    weight = 1.0 - (i / len(related_user_ids))  # Declining weight based on position
+                    interest_boosts.append(
+                        When(author_id=user_id, then=Value(weight * 10.0))
+                    )
+                
+                interest_boost_expr = Case(
+                    *interest_boosts,
+                    default=Value(0.1),
+                    output_field=FloatField()
+                )
+                
+                # Prepare annotations with interest boost
+                section_queryset = queryset.exclude(author=request.user).annotate(
+                    # Base score (interactions)
+                    base_score=ExpressionWrapper(
+                        (Cast('likes_count', FloatField()) * 1.0) +
+                        (Cast('comments_count', FloatField()) * 2.0),
+                        output_field=FloatField()
+                    ),
+                    
+                    # Recency score
+                    recency_score=Case(
+                        When(created_at__gte=timezone.now() - timedelta(hours=24), then=Value(15.0)),
+                        When(created_at__gte=timezone.now() - timedelta(hours=48), then=Value(10.0)),
+                        When(created_at__gte=timezone.now() - timedelta(days=7), then=Value(5.0)),
+                        default=Value(1.0),
+                        output_field=FloatField()
+                    ),
+                    
+                    # Interest graph score
+                    interest_score=interest_boost_expr,
+                    
+                    # Trending score
+                    trending_boost=ExpressionWrapper(
+                        F('trending_score__score') * 2.0,
+                        output_field=FloatField()
+                    ),
+                    
+                    # Combine for final score
+                    final_score=ExpressionWrapper(
+                        (F('base_score') * 0.2) +
+                        (F('recency_score') * 0.2) +
+                        (F('interest_score') * 0.5) +
+                        (F('trending_boost') * 0.1),
+                        output_field=FloatField()
+                    )
+                )
+                
+                # Order by final score
+                section_queryset = section_queryset.order_by('-final_score', '-created_at')
+            else:
+                # Fallback to trending if no interest graph
+                section_queryset = queryset.exclude(author=request.user).order_by('-trending_score__score', '-created_at')
+                
+        elif section == 'trending':
+            # Top trending posts
+            section_queryset = queryset.filter(trending_score__score__gt=0).order_by('-trending_score__score', '-created_at')
+            
+        elif section == 'discover':
+            # Discovery: random blend with slight recency bias
+            # Exclude posts from followed users if authenticated
+            if request.user.is_authenticated:
+                followed_user_ids = request.user.following.values_list('id', flat=True)
+                section_queryset = queryset.exclude(author_id__in=followed_user_ids)
+            else:
+                section_queryset = queryset
+                
+            # Add randomness factor while keeping some recency bias
+            section_queryset = section_queryset.annotate(
+                random_factor=Value(random.random(), output_field=FloatField()),
+                recency_score=Case(
+                    When(created_at__gte=timezone.now() - timedelta(days=7), then=Value(0.7)),
+                    When(created_at__gte=timezone.now() - timedelta(days=30), then=Value(0.5)),
+                    default=Value(0.3),
+                    output_field=FloatField()
+                ),
+                final_score=ExpressionWrapper(
+                    (F('random_factor') * 0.7) + (F('recency_score') * 0.3),
+                    output_field=FloatField()
+                )
+            ).order_by('-final_score')
+            
+        else:
+            # Invalid section, return empty list
+            return [], False
+        
+        # Apply pagination
+        total_count = section_queryset.count()
+        section_queryset = section_queryset[offset:offset + limit]
+        
+        # Check if there are more posts
+        has_more = total_count > (offset + limit)
+        
+        return list(section_queryset), has_more
 
     @action(detail=True, methods=['post'])
     def like(self, request, pk=None):
@@ -388,67 +654,66 @@ class PostViewSet(BaseViewSet):
         page = self.paginate_queryset(post.likes.all())
         
         if page is not None:
-            serializer = UserSerializer(page, many=True)
+            serializer = UserSerializer(page, many=True, context={'request': request})
             return self.get_paginated_response(serializer.data)
             
-        serializer = UserSerializer(post.likes.all(), many=True)
-        return Response(serializer.data)
+        serializer = UserSerializer(post.likes.all(), many=True, context={'request': request})
+        return Response({
+            'success': True,
+            'data': serializer.data
+        })
 
-    # @action(detail=True, methods=['post'])
-    # def share(self, request, pk=None):
-    #     """Share post to a chat room"""
-    #     post = self.get_object()
-    #     room_id = request.data.get('room_id')
-    #     message_text = request.data.get('message', '')
-
-    #     try:
-    #         room = ChatRoom.objects.get(
-    #             id=room_id,
-    #             participants=request.user
-    #         )
-    #     except ChatRoom.DoesNotExist:
-    #         return Response(
-    #             {'error': 'Chat room not found or access denied'},
-    #             status=status.HTTP_404_NOT_FOUND
-    #         )
-
-    #     # Create share message with more post details
-    #     shared_content = {
-    #         'type': 'shared_post',
-    #         'post_id': str(post.id),
-    #         'title': post.title,
-    #         'description': post.description,
-    #         'image_url': post.image.url if post.image else None,
-    #         'author': {
-    #             'username': post.author.username,
-    #             'profile_image': post.author.profile_image.url if post.author.profile_image else None
-    #         },
-    #         'message': message_text
-    #     }
-
-    #     message = Message.objects.create(
-    #         room=room,
-    #         sender=request.user,
-    #         content=json.dumps(shared_content)
-    #     )
-
-    #     # Record share interaction
-    #     interaction, created = PostInteraction.objects.get_or_create(
-    #         post=post,
-    #         user=request.user,
-    #         interaction_type='SHARE'
-    #     )
-
-    #     self._update_trending_score(post)
-    #     self._invalidate_post_caches(post.id)
-
-    #     return Response({
-    #         'success': True,
-    #         'data': {
-    #             'message_id': str(message.id),
-    #             'shared_content': shared_content
-    #         }
-    #     })
+    @action(detail=True, methods=['post'])
+    def record_view(self, request, pk=None):
+        """
+        Record a view of a post asynchronously.
+        Accepts optional view_duration parameter for engagement metrics.
+        """
+        try:
+            post = self.get_object()
+            
+            # Get duration if provided
+            view_duration = request.data.get('view_duration', 0)
+            try:
+                view_duration = int(view_duration)
+            except (ValueError, TypeError):
+                view_duration = 0
+                
+            # Use task to record view asynchronously (reduces API response time)
+            from .tasks import record_post_view
+            
+            if request.user.is_authenticated:
+                # For authenticated users, we'll use their ID
+                record_post_view.delay(
+                    user_id=str(request.user.id), 
+                    post_id=str(post.id),
+                    view_duration=view_duration
+                )
+                
+                return Response({
+                    'success': True,
+                    'message': 'View recorded'
+                })
+            else:
+                # For anonymous users, we still count the view but not linked to a user
+                # This updates global metrics but not personalization
+                try:
+                    post.trending_score.view_count += 1
+                    post.trending_score.save(update_fields=['view_count'])
+                except:
+                    pass
+                    
+                return Response({
+                    'success': True,
+                    'message': 'Anonymous view recorded'
+                })
+                
+        except Exception as e:
+            logger.error(f"Error recording view: {str(e)}")
+            return Response({
+                'success': False,
+                'message': 'Failed to record view'
+            }, status=status.HTTP_400_BAD_REQUEST)
 
     @action(detail=True, methods=['get'])
     def user_interaction(self, request, pk=None):
@@ -732,6 +997,141 @@ class PostViewSet(BaseViewSet):
                 'success': False,
                 'error': str(e)
             }, status=status.HTTP_400_BAD_REQUEST)
+
+    @action(detail=False, methods=['post'])
+    @permission_classes([IsAdminUser])
+    def calculate_trending_scores(self, request):
+        """
+        Admin action to calculate trending scores for all posts.
+        This would typically be run by a scheduled task (e.g. celery beat)
+        but can also be triggered manually by admins.
+        """
+        from django.db.models import Count, F, ExpressionWrapper, FloatField
+        from django.utils import timezone
+        from datetime import timedelta
+        from .models import Post, TrendingScore
+        
+        try:
+            # Time windows for scoring
+            now = timezone.now()
+            last_day = now - timedelta(days=1)
+            last_week = now - timedelta(days=7)
+            last_month = now - timedelta(days=30)
+            
+            # Process each post in batches
+            batch_size = int(request.data.get('batch_size', 500))
+            max_posts = int(request.data.get('max_posts', 10000))
+            
+            # Get posts ordered by recent interactions first
+            posts = Post.objects.annotate(
+                recent_likes=Count(
+                    'likes', 
+                    filter=Q(likes__created_at__gte=last_week)
+                ),
+                recent_comments=Count(
+                    'comments', 
+                    filter=Q(comments__created_at__gte=last_week)
+                ),
+                recent_views=Count(
+                    'views', 
+                    filter=Q(views__created_at__gte=last_week)
+                )
+            ).order_by(
+                '-recent_likes', 
+                '-recent_comments',
+                '-recent_views',
+                '-created_at'
+            )[:max_posts]
+            
+            # Process in batches
+            total_processed = 0
+            updated_count = 0
+            
+            for i in range(0, min(posts.count(), max_posts), batch_size):
+                batch = posts[i:i+batch_size]
+                
+                for post in batch:
+                    # Get interaction counts for different time periods
+                    day_likes = post.likes.filter(created_at__gte=last_day).count()
+                    week_likes = post.likes.filter(created_at__gte=last_week).count()
+                    month_likes = post.likes.filter(created_at__gte=last_month).count()
+                    
+                    day_comments = post.comments.filter(created_at__gte=last_day).count()
+                    week_comments = post.comments.filter(created_at__gte=last_week).count()
+                    month_comments = post.comments.filter(created_at__gte=last_month).count()
+                    
+                    day_views = post.views.filter(created_at__gte=last_day).count()
+                    week_views = post.views.filter(created_at__gte=last_week).count()
+                    month_views = post.views.filter(created_at__gte=last_month).count()
+                    
+                    # Calculate base interaction scores with time decay
+                    likes_score = (day_likes * 10) + (week_likes * 5) + (month_likes * 1)
+                    comments_score = (day_comments * 15) + (week_comments * 7) + (month_comments * 2)
+                    views_score = (day_views * 1) + (week_views * 0.5) + (month_views * 0.1)
+                    
+                    # Engagement ratio (interactions per view)
+                    total_views = post.views.count() or 1  # Avoid division by zero
+                    engagement_ratio = (post.likes.count() + post.comments.count()) / total_views
+                    
+                    # Account for post age (newer posts get a boost)
+                    age_factor = 1.0
+                    post_age_days = (now - post.created_at).days + 1  # Avoid division by zero
+                    
+                    if post_age_days <= 1:
+                        age_factor = 1.5
+                    elif post_age_days <= 3:
+                        age_factor = 1.2
+                    elif post_age_days <= 7:
+                        age_factor = 1.0
+                    elif post_age_days <= 14:
+                        age_factor = 0.8
+                    elif post_age_days <= 30:
+                        age_factor = 0.6
+                    else:
+                        age_factor = 0.4
+                    
+                    # Calculate final score
+                    final_score = (
+                        (likes_score * 1.0) +
+                        (comments_score * 1.5) +
+                        (views_score * 0.8)
+                    ) * engagement_ratio * age_factor
+                    
+                    # Update or create trending score
+                    trending_score, created = TrendingScore.objects.update_or_create(
+                        post=post,
+                        defaults={
+                            'score': final_score,
+                            'view_count': post.views.count(),
+                            'like_count': post.likes.count(),
+                            'comment_count': post.comments.count(),
+                            'share_count': post.interactions.filter(interaction_type='SHARE').count(),
+                            'last_calculated': now
+                        }
+                    )
+                    
+                    if created or trending_score.score != final_score:
+                        updated_count += 1
+                    
+                    total_processed += 1
+            
+            return Response({
+                'success': True,
+                'data': {
+                    'total_processed': total_processed,
+                    'updated_count': updated_count
+                },
+                'message': f'Processed {total_processed} posts, updated {updated_count} trending scores'
+            })
+            
+        except Exception as e:
+            import traceback
+            logger.error(f"Error calculating trending scores: {str(e)}")
+            logger.error(traceback.format_exc())
+            return Response({
+                'success': False,
+                'error': str(e)
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 class CommentViewSet(BaseViewSet):
     queryset = Comment.objects.select_related('author', 'post').order_by('-created_at')

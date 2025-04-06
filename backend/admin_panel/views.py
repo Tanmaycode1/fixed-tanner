@@ -39,11 +39,62 @@ from django.http import HttpResponse
 from celery import shared_task
 from core.celery import app as celery_app
 import threading
+from django.db import transaction, DatabaseError, connection
+from functools import wraps
+import asyncio
+import time
+import concurrent.futures
 
 # Set up logger
 logger = logging.getLogger(__name__)
 
 User = get_user_model()
+
+def with_transaction(f):
+    """Decorator to wrap a view method in a transaction with proper error handling"""
+    @wraps(f)
+    def wrapped(self, request, *args, **kwargs):
+        try:
+            with transaction.atomic():
+                return f(self, request, *args, **kwargs)
+        except DatabaseError as e:
+            logger.error(f"Database error in {f.__name__}: {str(e)}", exc_info=True)
+            return Response(
+                {'error': f"Database error: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+        except Exception as e:
+            logger.error(f"Error in {f.__name__}: {str(e)}", exc_info=True)
+            return Response(
+                {'error': str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+    return wrapped
+
+def async_operation(f):
+    """Decorator to run a method asynchronously using ThreadPoolExecutor"""
+    @wraps(f)
+    def wrapped(self, request, *args, **kwargs):
+        # For delete operations and other write operations, use this
+        executor = concurrent.futures.ThreadPoolExecutor(max_workers=4)
+        try:
+            future = executor.submit(f, self, request, *args, **kwargs)
+            return future.result(timeout=10)  # 10 second timeout
+        except concurrent.futures.TimeoutError:
+            logger.warning(f"Async operation {f.__name__} is taking longer than expected")
+            return Response(
+                {'message': 'Operation started but taking longer than expected. Check status later.'},
+                status=status.HTTP_202_ACCEPTED
+            )
+        except Exception as e:
+            logger.error(f"Error in async operation {f.__name__}: {str(e)}", exc_info=True)
+            return Response(
+                {'error': str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+        finally:
+            executor.shutdown(wait=False)
+    return wrapped
 
 @swagger_auto_schema(
     methods=['get'],
@@ -575,14 +626,51 @@ class AdminPanelViewSet(GenericViewSet):
         responses={204: 'No Content'}
     )
     @action(detail=True, methods=['delete'])
+    @with_transaction
+    @async_operation
     def delete_user(self, request, pk=None):
-        """Delete a user"""
+        """Delete a user with proper transaction management"""
         try:
-            user = User.objects.get(id=pk)
-            user.delete()
-            return Response(status=status.HTTP_204_NO_CONTENT)
+            # Check if user exists first to avoid acquiring lock unnecessarily
+            if not User.objects.filter(id=pk).exists():
+                return Response({'error': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
+            
+            # Lock the user record to prevent concurrent modification
+            with transaction.atomic():
+                user = User.objects.select_for_update().get(id=pk)
+                
+                # Log the action before deletion
+                logger.info(f"Admin deleting user {user.username} (ID: {user.id})")
+                
+                # Create moderator action record
+                if hasattr(request.user, 'id'):
+                    ModeratorAction.objects.create(
+                        moderator=request.user,
+                        action_type='USER_DELETE',
+                        target_id=str(user.id),
+                        target_type='USER',
+                        details=f"Deleted user {user.username}"
+                    )
+                
+                # Delete user - this will cascade to all related objects
+                user_id = user.id
+                username = user.username
+                user.delete()
+                
+                # Log success
+                logger.info(f"Successfully deleted user {username} (ID: {user_id})")
+                
+                # Return success
+                return Response(status=status.HTTP_204_NO_CONTENT)
+                
         except User.DoesNotExist:
             return Response({'error': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            logger.error(f"Error deleting user {pk}: {str(e)}", exc_info=True)
+            return Response(
+                {'error': f"Failed to delete user: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
     @swagger_auto_schema(
         methods=['get'],
@@ -860,14 +948,54 @@ class AdminPanelViewSet(GenericViewSet):
         responses={204: 'No Content'}
     )
     @action(detail=True, methods=['delete'])
+    @with_transaction
+    @async_operation
     def delete_post(self, request, pk=None):
-        """Delete a post"""
+        """Delete a post with proper transaction management"""
         try:
-            post = Post.objects.get(id=pk)
-            post.delete()
-            return Response(status=status.HTTP_204_NO_CONTENT)
+            # Check if post exists first to avoid acquiring lock unnecessarily
+            if not Post.objects.filter(id=pk).exists():
+                return Response({'error': 'Post not found'}, status=status.HTTP_404_NOT_FOUND)
+            
+            # Lock the post record to prevent concurrent modification
+            with transaction.atomic():
+                post = Post.objects.select_for_update().get(id=pk)
+                
+                # Store info for logging
+                post_id = post.id
+                post_title = post.title
+                author_id = post.author.id if post.author else None
+                
+                # Log the action before deletion
+                logger.info(f"Admin deleting post {post_title} (ID: {post_id})")
+                
+                # Create moderator action record
+                if hasattr(request.user, 'id'):
+                    ModeratorAction.objects.create(
+                        moderator=request.user,
+                        action_type='POST_DELETE',
+                        target_id=str(post_id),
+                        target_type='POST',
+                        details=f"Deleted post '{post_title}' by user ID {author_id}"
+                    )
+                
+                # Delete post - this will cascade to all related objects
+                post.delete()
+                
+                # Log success
+                logger.info(f"Successfully deleted post {post_title} (ID: {post_id})")
+                
+                # Return success
+                return Response(status=status.HTTP_204_NO_CONTENT)
+                
         except Post.DoesNotExist:
             return Response({'error': 'Post not found'}, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            logger.error(f"Error deleting post {pk}: {str(e)}", exc_info=True)
+            return Response(
+                {'error': f"Failed to delete post: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
     @swagger_auto_schema(
         methods=['post'],
@@ -882,11 +1010,11 @@ class AdminPanelViewSet(GenericViewSet):
             },
             required=['post_ids']
         ),
-        responses={204: 'No Content'}
+        responses={202: 'Accepted'}
     )
     @action(detail=False, methods=['post'])
     def bulk_delete_posts(self, request):
-        """Delete multiple posts at once"""
+        """Delete multiple posts using background processing for better performance"""
         post_ids = request.data.get('post_ids', [])
         if not post_ids:
             return Response(
@@ -895,14 +1023,78 @@ class AdminPanelViewSet(GenericViewSet):
             )
 
         try:
-            # Delete posts in batches to avoid memory issues
-            batch_size = 100
-            for i in range(0, len(post_ids), batch_size):
-                batch = post_ids[i:i + batch_size]
-                Post.objects.filter(id__in=batch).delete()
-
-            return Response(status=status.HTTP_204_NO_CONTENT)
+            # Create a unique operation ID for tracking
+            operation_id = str(uuid.uuid4())
+            
+            # Store the total number of posts for progress tracking
+            total_posts = len(post_ids)
+            cache.set(f"bulk_delete_{operation_id}_total", total_posts, 3600)
+            cache.set(f"bulk_delete_{operation_id}_completed", 0, 3600)
+            cache.set(f"bulk_delete_{operation_id}_status", "PROCESSING", 3600)
+            
+            # Start background task
+            task = celery_app.send_task(
+                'admin_panel.tasks.bulk_delete_posts', 
+                args=[post_ids, operation_id, request.user.id if hasattr(request.user, 'id') else None]
+            )
+            
+            return Response({
+                'message': f'Bulk delete operation started with {total_posts} posts',
+                'operation_id': operation_id,
+                'task_id': task.id
+            }, status=status.HTTP_202_ACCEPTED)
+            
         except Exception as e:
+            logger.error(f"Error starting bulk delete: {str(e)}", exc_info=True)
+            return Response(
+                {'error': str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+    @swagger_auto_schema(
+        methods=['get'],
+        operation_description="Check status of bulk delete operation",
+        manual_parameters=[
+            openapi.Parameter(
+                'operation_id', 
+                openapi.IN_QUERY,
+                description="Operation ID returned when starting the bulk delete",
+                type=openapi.TYPE_STRING,
+                required=True
+            ),
+        ],
+        responses={200: "Operation status"}
+    )
+    @action(detail=False, methods=['get'])
+    def bulk_delete_status(self, request):
+        """Get status of a bulk delete operation"""
+        operation_id = request.query_params.get('operation_id')
+        if not operation_id:
+            return Response({'error': 'operation_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            # Get progress from cache
+            total = cache.get(f"bulk_delete_{operation_id}_total")
+            completed = cache.get(f"bulk_delete_{operation_id}_completed")
+            op_status = cache.get(f"bulk_delete_{operation_id}_status")
+            errors = cache.get(f"bulk_delete_{operation_id}_errors", [])
+            
+            if total is None:
+                return Response({'error': 'Operation not found or expired'}, status=status.HTTP_404_NOT_FOUND)
+            
+            progress = int((completed / total) * 100) if total > 0 else 0
+            
+            return Response({
+                'operation_id': operation_id,
+                'status': op_status,
+                'progress': progress,
+                'completed': completed,
+                'total': total,
+                'errors': errors
+            })
+            
+        except Exception as e:
+            logger.error(f"Error getting bulk delete status: {str(e)}", exc_info=True)
             return Response(
                 {'error': str(e)},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
@@ -1089,51 +1281,24 @@ class AdminPanelViewSet(GenericViewSet):
                 'users': []
             }
 
+            # Use the main search implementation from SearchViewSet for consistency
+            from search.views import SearchViewSet
+            search_viewset = SearchViewSet()
+            search_viewset.request = request
+
             # Get users if requested
             if search_type in ['all', 'users']:
                 try:
-                    # Calculate similarities for user search
-                    username_similarity = TrigramSimilarity('username', query)
-                    name_similarity = Greatest(
-                        TrigramSimilarity('first_name', query),
-                        TrigramSimilarity('last_name', query)
-                    )
-                    
-                    users = User.objects.annotate(
-                        # Exact match score
-                        exact_match=Case(
-                            When(username__iexact=query, then=Value(1.0)),
-                            default=Value(0.0)
-                        ),
-                        # Contains score
-                        contains_score=Case(
-                            When(username__icontains=query, then=Value(0.6)),
-                            When(first_name__icontains=query, then=Value(0.5)),
-                            When(last_name__icontains=query, then=Value(0.5)),
-                            When(bio__icontains=query, then=Value(0.3)),
-                            When(email__icontains=query, then=Value(0.7)),  # Added email search for admin
-                            default=Value(0.0)
-                        ),
-                        # Similarity score
-                        similarity=Greatest(
-                            username_similarity * 0.4,
-                            name_similarity * 0.3
-                        ),
-                        # Final relevance score
-                        relevance=Greatest(
-                            F('exact_match'),
-                            F('contains_score'),
-                            F('similarity')
-                        )
-                    ).filter(
-                        Q(relevance__gt=0.2)  # Adjust threshold as needed
-                    ).order_by('-relevance', 'username')[:50]  # Increased limit for admin
-
-                    results['users'] = AdminUserSerializer(
-                        users,
-                        many=True,
-                        context={'request': request}
-                    ).data
+                    users_results = search_viewset._search_users(query)
+                    # Convert to admin serializer format
+                    user_ids = [user['id'] for user in users_results]
+                    if user_ids:
+                        users = User.objects.filter(id__in=user_ids)
+                        results['users'] = AdminUserSerializer(
+                            users,
+                            many=True,
+                            context={'request': request}
+                        ).data
                     
                     logger.info(f"Found {len(results['users'])} users")
                 except Exception as e:
@@ -1142,40 +1307,16 @@ class AdminPanelViewSet(GenericViewSet):
             # Get posts if requested
             if search_type in ['all', 'posts']:
                 try:
-                    # Calculate similarities for post search
-                    title_similarity = TrigramSimilarity('title', query)
-                    desc_similarity = TrigramSimilarity('description', query)
-                    
-                    posts = Post.objects.annotate(
-                        exact_match=Case(
-                            When(title__iexact=query, then=Value(1.0)),
-                            default=Value(0.0)
-                        ),
-                        contains_score=Case(
-                            When(title__icontains=query, then=Value(0.7)),
-                            When(description__icontains=query, then=Value(0.5)),
-                            default=Value(0.0)
-                        ),
-                        similarity=Greatest(
-                            title_similarity * 0.4,
-                            desc_similarity * 0.3
-                        ),
-                        relevance=Greatest(
-                            F('exact_match'),
-                            F('contains_score'),
-                            F('similarity')
-                        )
-                    ).select_related(
-                        'author'
-                    ).filter(
-                        Q(relevance__gt=0.2)
-                    ).order_by('-relevance', '-created_at')[:50]  # Increased limit for admin
-
-                    results['posts'] = AdminPostSerializer(
-                        posts,
-                        many=True,
-                        context={'request': request}
-                    ).data
+                    posts_results = search_viewset._search_posts(query)
+                    # Convert to admin serializer format
+                    post_ids = [post['id'] for post in posts_results]
+                    if post_ids:
+                        posts = Post.objects.filter(id__in=post_ids)
+                        results['posts'] = AdminPostSerializer(
+                            posts,
+                            many=True,
+                            context={'request': request}
+                        ).data
                     
                     logger.info(f"Found {len(results['posts'])} posts")
                 except Exception as e:
@@ -1784,3 +1925,86 @@ class BulkUploadViewSet(viewsets.ViewSet):
             return Response({'error': 'Task not found'}, status=status.HTTP_404_NOT_FOUND)
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+@celery_app.task(name="admin_panel.tasks.bulk_delete_posts", bind=True, max_retries=3)
+def bulk_delete_posts(self, post_ids, operation_id, user_id=None):
+    """Celery task to delete posts in bulk with proper error handling and progress tracking"""
+    logger.info(f"Starting bulk delete of {len(post_ids)} posts")
+    
+    # Initialize counters
+    total = len(post_ids)
+    completed = 0
+    errors = []
+    
+    # Get admin user if provided
+    admin_user = None
+    if user_id:
+        try:
+            admin_user = User.objects.get(id=user_id)
+        except User.DoesNotExist:
+            logger.warning(f"Admin user {user_id} not found for logging")
+    
+    try:
+        # Process in batches to avoid memory issues
+        batch_size = 50
+        for i in range(0, total, batch_size):
+            batch = post_ids[i:i + min(batch_size, total - i)]
+            
+            # Process each post individually to handle errors gracefully
+            for post_id in batch:
+                try:
+                    with transaction.atomic():
+                        # Get post with lock
+                        try:
+                            post = Post.objects.select_for_update(nowait=True).get(id=post_id)
+                        except Post.DoesNotExist:
+                            errors.append(f"Post {post_id} not found")
+                            continue
+                        
+                        # Create ModeratorAction
+                        if admin_user:
+                            ModeratorAction.objects.create(
+                                moderator=admin_user,
+                                action_type='POST_DELETE',
+                                target_id=str(post.id),
+                                target_type='POST',
+                                details=f"Bulk deleted post '{post.title}'"
+                            )
+                        
+                        # Delete the post
+                        post.delete()
+                        completed += 1
+                        
+                        # Update progress in cache
+                        cache.set(f"bulk_delete_{operation_id}_completed", completed, 3600)
+                        
+                except Exception as e:
+                    error_msg = f"Error deleting post {post_id}: {str(e)}"
+                    logger.error(error_msg)
+                    errors.append(error_msg)
+            
+            # Prevent transaction log buildup
+            transaction.commit()
+                
+            # Sleep briefly to prevent database overload
+            time.sleep(0.1)
+    
+    except Exception as e:
+        logger.error(f"Bulk deletion failed: {str(e)}", exc_info=True)
+        cache.set(f"bulk_delete_{operation_id}_status", "FAILED", 3600)
+        cache.set(f"bulk_delete_{operation_id}_errors", [str(e)] + errors, 3600)
+        raise
+    
+    # Update final status
+    final_status = "COMPLETED" if completed == total else "COMPLETED_WITH_ERRORS"
+    cache.set(f"bulk_delete_{operation_id}_status", final_status, 3600)
+    if errors:
+        cache.set(f"bulk_delete_{operation_id}_errors", errors, 3600)
+    
+    logger.info(f"Bulk delete completed: {completed}/{total} posts deleted")
+    return {
+        'status': final_status,
+        'completed': completed,
+        'total': total,
+        'errors': errors
+    }

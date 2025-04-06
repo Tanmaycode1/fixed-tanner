@@ -1,5 +1,6 @@
 import os
 from celery import Celery
+from celery.schedules import crontab
 
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'core.settings')
 
@@ -31,8 +32,31 @@ app.conf.update(
         'interval_step': 0.2,
         'interval_max': 0.5,
     },
+    
+    # Periodic task schedule
+    beat_schedule={
+        # Feed related periodic tasks
+        'update-trending-scores': {
+            'task': 'posts.tasks.update_trending_scores',
+            'schedule': crontab(minute='0', hour='*/3'),  # Every 3 hours
+            'args': (500, 10000),  # batch_size, max_posts
+            'options': {'expires': 3600},
+        },
+        'update-user-preferences': {
+            'task': 'posts.tasks.update_user_preferences',
+            'schedule': crontab(minute='0', hour='*/12'),  # Twice daily
+            'args': (100, 10000),  # batch_size, max_users
+            'options': {'expires': 7200},
+        },
+        'update-user-interest-graphs': {
+            'task': 'posts.tasks.update_user_interest_graphs',
+            'schedule': crontab(minute='0', hour='0'),  # Once daily at midnight
+            'args': (50, 1000),  # batch_size, max_users
+            'options': {'expires': 10800},
+        },
+    }
 )
 
 @app.task(bind=True, ignore_result=True)
 def debug_task(self):
-    print(f'Request: {self.request!r}') 
+    print(f'Request: {self.request!r}')

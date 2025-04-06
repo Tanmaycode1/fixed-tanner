@@ -6,6 +6,7 @@ mkdir -p /app/staticfiles/admin/js
 mkdir -p /app/media/audio
 mkdir -p /app/media/avatars
 mkdir -p /app/static
+mkdir -p /app/migrations
 
 # Set permissions
 chmod -R 755 /app/staticfiles
@@ -43,11 +44,25 @@ else
     wait_for_service db 5432 "Database"
 fi
 
+# Download NLTK data required for advanced search
+python -m nltk.downloader punkt stopwords wordnet
+
 # Run migrations
 python manage.py migrate
 
 # Collect static files
 python manage.py collectstatic --noinput
+
+# Create superuser if needed
+python manage.py shell -c "
+from django.contrib.auth import get_user_model;
+User = get_user_model();
+if not User.objects.filter(username='admin').exists():
+    User.objects.create_superuser('admin', 'admin@example.com', 'admin');
+    print('Superuser created.');
+else:
+    print('Superuser already exists.');
+"
 
 # Start Daphne with debug logging
 exec daphne -v2 -b 0.0.0.0 -p 8000 core.asgi:application

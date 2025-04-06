@@ -16,9 +16,10 @@ from io import BytesIO
 import logging
 from rest_framework.authentication import BasicAuthentication
 from django.core.paginator import Paginator
-from django.db.models import Exists, OuterRef, Q
+from django.db.models import Exists, OuterRef, Q, Count
 from core.utils.test_connections import test_s3_connection
 from core.utils.file_handlers import handle_uploaded_file
+import uuid
 
 logger = logging.getLogger(__name__)
 
@@ -299,28 +300,194 @@ class UserViewSet(viewsets.ModelViewSet):
     @handle_exceptions
     @action(detail=False, methods=['GET'])
     def suggestions(self, request):
-        """Get user suggestions"""
+        """
+        Get user suggestions based on an advanced algorithm
+        
+        Query parameters:
+        - limit: Number of suggestions to return (default: 10)
+        - algorithm: One of 'graph' (interest graph), 'similar' (similar users), 'random' (random users)
+                    or 'all' (blend of all algorithms) (default: 'all')
+        - exclude_following: Whether to exclude users already followed (default: true)
+        """
         try:
-            # Your existing suggestion logic
-            suggestions = User.objects.exclude(
-                id=request.user.id
-            ).exclude(
-                followers=request.user
-            ).order_by('?')[:5]  # Random 5 users
+            # Parse query parameters
+            limit = min(int(request.query_params.get('limit', 10)), 50)  # Cap at 50
+            algorithm = request.query_params.get('algorithm', 'all').lower()
+            exclude_following = request.query_params.get('exclude_following', 'true').lower() == 'true'
             
-            # Use UserSerializer with proper context
-            serializer = UserSerializer(suggestions, many=True, context={'request': request})
+            # Base queryset for users
+            user_queryset = User.objects.exclude(id=request.user.id)
+            
+            # Exclude users already followed if requested
+            if exclude_following:
+                user_queryset = user_queryset.exclude(followers=request.user)
+            
+            # Track suggestion sources for analytics
+            suggestion_sources = []
+            suggested_user_ids = set()
+            
+            # Dictionary to track final suggestions with score
+            suggested_users_with_score = {}
+            
+            # 1. Get suggestions from interest graph if available
+            if algorithm in ['graph', 'all']:
+                try:
+                    # Import from posts app to avoid circular imports
+                    from posts.models import UserInterestGraph
+                    
+                    # Get or create interest graph
+                    interest_graph = UserInterestGraph.get_or_create_for_user(request.user)
+                    
+                    # Get suggested users from graph
+                    graph_suggestions = interest_graph.get_suggested_users(limit=limit*2)  # Get more than needed for blending
+                    
+                    if graph_suggestions:
+                        suggestion_sources.append('graph')
+                        
+                        # Add graph suggestions with score
+                        for user_id, weight in graph_suggestions:
+                            if user_id not in suggested_user_ids:
+                                suggested_users_with_score[user_id] = {
+                                    'score': weight * 10.0,  # Scale up for consistent scoring
+                                    'source': 'graph'
+                                }
+                                suggested_user_ids.add(user_id)
+                except Exception as e:
+                    # Log error but continue with other algorithms
+                    logger.warning(f"Error getting graph suggestions: {str(e)}")
+            
+            # 2. Get similar users based on common followers/following
+            if algorithm in ['similar', 'all'] and len(suggested_user_ids) < limit*2:
+                try:
+                    # Get users who are followed by people the current user follows
+                    # (friends of friends)
+                    following_users = request.user.following.all()
+                    
+                    if following_users.exists():
+                        # Get users followed by people I follow, with count of how many follow them
+                        similar_users = User.objects.filter(
+                            followers__in=following_users
+                        ).exclude(
+                            id=request.user.id
+                        ).exclude(
+                            id__in=suggested_user_ids
+                        )
+                        
+                        if exclude_following:
+                            similar_users = similar_users.exclude(followers=request.user)
+                        
+                        similar_users = similar_users.annotate(
+                            common_count=Count('followers')
+                        ).order_by('-common_count')[:limit]
+                        
+                        if similar_users.exists():
+                            suggestion_sources.append('similar')
+                            
+                            # Add similar users with score based on common connections
+                            for user in similar_users:
+                                if str(user.id) not in suggested_user_ids:
+                                    suggested_users_with_score[str(user.id)] = {
+                                        'score': user.common_count * 5.0,  # Scale for consistent scoring
+                                        'source': 'similar'
+                                    }
+                                    suggested_user_ids.add(str(user.id))
+                except Exception as e:
+                    logger.warning(f"Error getting similar user suggestions: {str(e)}")
+            
+            # 3. Get random suggestions if needed to fill out the results
+            if algorithm in ['random', 'all'] and len(suggested_user_ids) < limit:
+                try:
+                    # Number of random suggestions needed
+                    random_count = limit - len(suggested_user_ids)
+                    
+                    if random_count > 0:
+                        # Get random users excluding those already included
+                        random_users = user_queryset.exclude(
+                            id__in=suggested_user_ids
+                        ).order_by('?')[:random_count]
+                        
+                        if random_users.exists():
+                            suggestion_sources.append('random')
+                            
+                            # Add random users with low score
+                            for user in random_users:
+                                if str(user.id) not in suggested_user_ids:
+                                    suggested_users_with_score[str(user.id)] = {
+                                        'score': 1.0,  # Low base score
+                                        'source': 'random'
+                                    }
+                                    suggested_user_ids.add(str(user.id))
+                except Exception as e:
+                    logger.warning(f"Error getting random user suggestions: {str(e)}")
+            
+            # If we still have no suggestions, fall back to random users
+            if not suggested_users_with_score:
+                random_users = user_queryset.order_by('?')[:limit]
+                suggestion_sources.append('fallback_random')
+                
+                for user in random_users:
+                    suggested_users_with_score[str(user.id)] = {
+                        'score': 1.0,
+                        'source': 'fallback_random'
+                    }
+            
+            # Sort suggestions by score
+            sorted_suggestions = sorted(
+                suggested_users_with_score.items(), 
+                key=lambda x: x[1]['score'],
+                reverse=True
+            )
+            
+            # Limit to requested number
+            final_suggestions = sorted_suggestions[:limit]
+            
+            # Get user objects in one query
+            suggested_user_ids = [uuid.UUID(user_id) for user_id, _ in final_suggestions]
+            suggested_users = User.objects.filter(id__in=suggested_user_ids)
+            
+            # Create ordered dict to preserve sorting
+            ordered_users = []
+            user_dict = {str(user.id): user for user in suggested_users}
+            
+            for user_id, user_data in final_suggestions:
+                if user_id in user_dict:
+                    ordered_users.append(user_dict[user_id])
+            
+            # Serialize users
+            serializer = UserSerializer(ordered_users, many=True, context={'request': request})
+            
+            # Track suggestion algorithm usage for analytics
+            logger.info(f"User suggestion sources: {', '.join(suggestion_sources)}")
             
             return Response({
                 'success': True,
-                'data': serializer.data
+                'data': serializer.data,
+                'metadata': {
+                    'sources': suggestion_sources,
+                    'count': len(serializer.data)
+                }
             })
+            
         except Exception as e:
-            logger.error(f"Error fetching suggestions: {str(e)}")
+            logger.error(f"Error generating user suggestions: {str(e)}")
+            import traceback
+            logger.error(traceback.format_exc())
+            
+            # Fallback to simple random suggestions
+            fallback_users = User.objects.exclude(
+                id=request.user.id
+            ).order_by('?')[:5]
+            
+            serializer = UserSerializer(fallback_users, many=True, context={'request': request})
+            
             return Response({
-                'success': False,
-                'message': 'Failed to fetch suggestions'
-            }, status=status.HTTP_400_BAD_REQUEST)
+                'success': True,
+                'data': serializer.data,
+                'metadata': {
+                    'sources': ['fallback'],
+                    'count': len(serializer.data)
+                }
+            })
 
 
 

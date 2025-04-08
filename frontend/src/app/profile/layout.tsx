@@ -38,7 +38,7 @@ export default function ProfileLayout({
           <div className="bg-white/80 dark:bg-gray-900/80 backdrop-blur-lg border-b border-gray-200 dark:border-gray-800">
             <div className="px-4 h-16 flex items-center justify-between">
               <span className="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-primary-600 to-primary-400">
-                Neuhu
+                Eemu
               </span>
               {/* <button
                 onClick={toggleTheme}

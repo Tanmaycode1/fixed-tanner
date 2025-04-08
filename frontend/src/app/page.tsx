@@ -129,6 +129,7 @@ export default function Home() {
                 transition={{ type: "spring", duration: 1 }}
                 className="inline-flex items-center justify-center mb-8 bg-white/10 dark:bg-white/5 backdrop-blur-lg rounded-2xl p-4 relative z-20"
               >
+                
                 <span className="text-4xl md:text-5xl font-bold bg-gradient-to-r from-[#38BDF8] to-[#0EA5E9] bg-clip-text text-transparent">
                   Eemu
                 </span>

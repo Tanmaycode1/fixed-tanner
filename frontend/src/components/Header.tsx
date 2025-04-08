@@ -11,7 +11,7 @@ const Header = () => {
       <nav className="container mx-auto px-4 py-4">
         <div className="flex items-center justify-between">
           <Link href="/" className="flex items-center space-x-2">
-            <div className="relative w-8 h-8">
+            <div className="relative w-16 h-16">
               <Image src="/favicon.jpeg" alt="Eemu" fill className="object-contain" />
             </div>
             <motion.div

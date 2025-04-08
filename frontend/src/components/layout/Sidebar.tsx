@@ -104,7 +104,7 @@ export function Sidebar({ currentUser }: { currentUser: UserType | null }) {
       <div className="flex h-16 items-center px-6 border-b border-gray-200 dark:border-gray-800">
         <Link href="/dashboard" className="flex items-center gap-2">
           <div className="relative w-7 h-7">
-            <NextImage src="/favicon.jpeg" alt="Neuhu" fill className="object-contain" />
+            <NextImage src="/favicon.jpeg" alt="Eemu" fill className="object-contain" />
           </div>
           <motion.span 
             className="text-2xl font-bold bg-gradient-to-r from-primary-600 to-primary-400 bg-clip-text text-transparent"
@@ -112,7 +112,7 @@ export function Sidebar({ currentUser }: { currentUser: UserType | null }) {
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.3 }}
           >
-            Neuhu
+            Eemu
           </motion.span>
         </Link>
       </div>

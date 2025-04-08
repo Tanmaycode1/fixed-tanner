@@ -101,7 +101,7 @@ export default function Home() {
                 transition={{ duration: 0.6, delay: 0.4 }}
                 className="text-xl text-gray-600 dark:text-gray-300 mb-8"
               >
-                Neuhu delivers business, markets expert news, analysis, and audios to the world, 
+                Eemu delivers business, markets expert news, analysis, and audios to the world, 
                 featuring stories from global experts.
               </motion.p>
               
@@ -174,7 +174,7 @@ export default function Home() {
             className="text-center mb-16"
           >
             <h2 className="text-3xl md:text-4xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-primary-600 to-primary-400 dark:from-primary-400 dark:to-primary-200 mb-4">
-              Why Choose Neuhu?
+              Why Choose Eemu?
             </h2>
             <p className="text-xl text-gray-600 dark:text-gray-300 max-w-2xl mx-auto">
               Your gateway to expert insights, real-time market analysis, and a thriving professional community.
@@ -217,10 +217,10 @@ export default function Home() {
             className="text-center mb-16"
           >
             <h2 className="text-3xl md:text-4xl font-bold text-gray-900 dark:text-white mb-4">
-              How Neuhu Works
+              How Eemu Works
             </h2>
             <p className="text-xl text-gray-600 dark:text-gray-300 max-w-2xl mx-auto">
-              Get started with Neuhu in four simple steps
+              Get started with Eemu in four simple steps
             </p>
           </motion.div>
 

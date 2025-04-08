@@ -41,7 +41,7 @@ const Footer = () => {
             <Link href="/" className="flex items-center space-x-2">
               <BookOpen className="h-6 w-6 text-blue-500" />
               <span className="text-2xl font-bold bg-gradient-to-r from-blue-500 to-blue-600 bg-clip-text text-transparent">
-                Neuhu
+                Eemu
               </span>
             </Link>
             <p className="text-gray-600 dark:text-gray-300 max-w-md">
@@ -119,7 +119,7 @@ const Footer = () => {
         <div className="mt-12 pt-8 border-t border-gray-200 dark:border-gray-800">
           <div className="flex flex-col md:flex-row justify-between items-center space-y-4 md:space-y-0">
             <p className="text-gray-600 dark:text-gray-400">
-              © {new Date().getFullYear()} Neuhu. All rights reserved.
+              © {new Date().getFullYear()} Eemu. All rights reserved.
             </p>
             <div className="flex space-x-6">
               <Link 

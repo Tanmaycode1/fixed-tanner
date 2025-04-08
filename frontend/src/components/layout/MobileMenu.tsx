@@ -44,7 +44,7 @@ export function MobileMenu({ isOpen, onClose }: MobileMenuProps) {
               <div className="flex items-center justify-between p-4 border-b">
                 <div className="flex items-center gap-2">
                   <div className="relative w-5 h-5">
-                    <Image src="/favicon.jpeg" alt="Neuhu" fill className="object-contain" />
+                    <Image src="/favicon.jpeg" alt="Eemu" fill className="object-contain" />
                   </div>
                   <h2 className="font-semibold">Menu</h2>
                 </div>

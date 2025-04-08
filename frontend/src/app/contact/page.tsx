@@ -20,7 +20,7 @@ const contactInfo = [
     icon: EnvelopeIcon,
     title: "Email",
     details: [
-      { label: "Neuhu", value: "Info@neuhu.com" },
+      { label: "Eemu", value: "Info@eemu.com" },
       { label: "KPG Capital", value: "Info@kpgcap.com" }
     ]
   },
@@ -28,7 +28,7 @@ const contactInfo = [
     icon: BuildingOfficeIcon,
     title: "Office",
     details: [
-      { label: "Address", value: "Neuhu Inc, 450 LEXINGTON AVE, NEW YORK NY 10017" }
+      { label: "Address", value: "Eemu Inc, 450 LEXINGTON AVE, NEW YORK NY 10017" }
     ]
   }
 ];
@@ -36,12 +36,12 @@ const contactInfo = [
 // FAQ items
 const faqItems = [
   {
-    question: "What is Neuhu?",
-    answer: "Neuhu is a premier platform for business news, expert analysis, and professional networking, delivering business and markets news, analysis, and audio content from global experts."
+    question: "What is Eemu?",
+    answer: "Eemu is a premier platform for business news, expert analysis, and professional networking, delivering business and markets news, analysis, and audio content from global experts."
   },
   {
     question: "How can I join the platform?",
-    answer: "You can easily join Neuhu by clicking on the 'Get Started' button and registering with your email address. It's free to create an account and start exploring our content."
+    answer: "You can easily join Eemu by clicking on the 'Get Started' button and registering with your email address. It's free to create an account and start exploring our content."
   },
   {
     question: "Do you offer premium subscriptions?",
@@ -97,7 +97,7 @@ export default function Contact() {
                 className="text-xl text-gray-600 dark:text-gray-300 mb-8"
               >
                 Have questions or feedback? We'd love to hear from you. 
-                Reach out to our team for assistance or more information about Neuhu.
+                Reach out to our team for assistance or more information about Eemu.
               </motion.p>
             </div>
 
@@ -110,7 +110,7 @@ export default function Contact() {
               <div className="relative aspect-[4/3] rounded-lg overflow-hidden shadow-xl dark:shadow-primary-500/10">
                 <Image
                   src="https://images.unsplash.com/photo-1577962917302-cd874c4e31d2?ixlib=rb-4.0.3&ixid=MnwxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8&auto=format&fit=crop&w=2070&q=80"
-                  alt="Neuhu office building"
+                  alt="Eemu office building"
                   fill
                   className="object-cover"
                   priority
@@ -386,7 +386,7 @@ export default function Contact() {
               allowFullScreen 
               loading="lazy" 
               referrerPolicy="no-referrer-when-downgrade"
-              title="Neuhu Office Location"
+              title="Eemu Office Location"
             ></iframe>
           </motion.div>
         </div>

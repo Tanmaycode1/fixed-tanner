@@ -12,14 +12,14 @@ const Header = () => {
         <div className="flex items-center justify-between">
           <Link href="/" className="flex items-center space-x-2">
             <div className="relative w-8 h-8">
-              <Image src="/favicon.jpeg" alt="Neuhu" fill className="object-contain" />
+              <Image src="/favicon.jpeg" alt="Eemu" fill className="object-contain" />
             </div>
             <motion.div
               initial={{ scale: 0.8 }}
               animate={{ scale: 1 }}
               className="text-2xl font-bold text-primary-600 dark:text-primary-400"
             >
-              Neuhu
+              Eemu
             </motion.div>
           </Link>
           

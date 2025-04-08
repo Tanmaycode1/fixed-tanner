@@ -34,9 +34,9 @@ const MobileMenu = () => {
             <nav className="container mx-auto px-4">
               <div className="flex items-center mb-4">
                 <div className="relative w-6 h-6">
-                  <Image src="/favicon.jpeg" alt="Neuhu" fill className="object-contain" />
+                  <Image src="/favicon.jpeg" alt="Eemu" fill className="object-contain" />
                 </div>
-                <span className="ml-2 font-semibold text-gray-900 dark:text-white">Neuhu</span>
+                <span className="ml-2 font-semibold text-gray-900 dark:text-white">Eemu</span>
               </div>
               <ul className="space-y-4">
                 <li>

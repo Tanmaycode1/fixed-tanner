@@ -27,6 +27,7 @@ const Header = () => {
             <NavLink href="/">Home</NavLink>
             <NavLink href="/about">About</NavLink>
             <NavLink href="/contact">Contact</NavLink>
+            <NavLink href="/premium">Premium</NavLink>
           </div>
 
           <div className="flex items-center space-x-4">

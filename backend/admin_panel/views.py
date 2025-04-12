@@ -14,8 +14,8 @@ from .serializers import (
     AdminPostSerializer
 )
 from .permissions import IsSuperuserOrAdmin, IsModeratorOrAbove, APIKeyPermission
-from django.db.models import Q, Count
-from django.db.models.functions import TruncDay, Greatest
+from django.db.models import Q, Count, OuterRef, Subquery, Sum, Avg
+from django.db.models.functions import TruncDay, Greatest, Coalesce
 from django.contrib.postgres.search import TrigramSimilarity
 from django.db.models import Case, When, Value, F
 from django.utils import timezone
@@ -1124,6 +1124,10 @@ class AdminPanelViewSet(GenericViewSet):
     @action(detail=False, methods=['get'])
     def post_stats(self, request):
         """Get statistics about posts"""
+        from django.core.cache import cache
+        import hashlib
+        import json
+        
         start_date = request.query_params.get('start_date')
         end_date = request.query_params.get('end_date')
         
@@ -1144,83 +1148,140 @@ class AdminPanelViewSet(GenericViewSet):
             except ValueError:
                 return Response({"error": "Invalid end_date format. Use YYYY-MM-DD"}, status=400)
         
-        # Get posts in date range
-        posts = Post.objects.filter(
-            created_at__date__gte=start_date,
-            created_at__date__lte=end_date
-        )
+        # Create cache key based on dates
+        cache_key = f"post_stats_{start_date}_{end_date}"
+        cached_result = cache.get(cache_key)
         
-        # Count by type
-        post_types = posts.values('type').annotate(count=Count('id'))
-        post_types_dict = {item['type']: item['count'] for item in post_types}
+        if cached_result:
+            logger.info(f"Returning cached post stats for {start_date} to {end_date}")
+            return Response(cached_result)
         
-        # Posts by day
-        posts_by_day = posts.annotate(
-            day=TruncDay('created_at')
-        ).values('day').annotate(count=Count('id')).order_by('day')
-
-        # Engagement stats
-        total_likes = sum(post.likes.count() for post in posts)
-        total_comments = sum(post.comments.count() for post in posts)
-        
-        # Top authors
-        top_authors = posts.values(
-            'author__id', 
-            'author__username', 
-            'author__first_name', 
-            'author__last_name'
-        ).annotate(
-            post_count=Count('id')
-        ).order_by('-post_count')[:5]
-        
-        # Most liked posts
-        most_liked_posts = sorted(
-            [(post, post.likes.count()) for post in posts], 
-            key=lambda x: x[1], 
-            reverse=True
-        )[:5]
-        most_liked_posts = [
-            {
-                'id': post.id,
-                'title': post.title,
-                'type': post.type,
-                'likes_count': likes_count,
-                'author': post.author.username
+        try:
+            # Get posts in date range with optimized query
+            posts_query = Post.objects.filter(
+                created_at__date__gte=start_date,
+                created_at__date__lte=end_date
+            )
+            
+            # Get the count without fetching all objects
+            total_posts = posts_query.count()
+            
+            if total_posts == 0:
+                logger.info(f"No posts found between {start_date} and {end_date}")
+                empty_result = {
+                    'total_posts': 0,
+                    'post_types': {},
+                    'posts_by_day': [],
+                    'engagement': {
+                        'total_likes': 0,
+                        'total_comments': 0,
+                        'avg_likes_per_post': 0,
+                        'avg_comments_per_post': 0,
+                    },
+                    'top_authors': [],
+                    'most_liked_posts': [],
+                    'most_commented_posts': [],
+                }
+                # Cache the empty result for 1 hour
+                cache.set(cache_key, empty_result, 3600)
+                return Response(empty_result)
+            
+            # Count by type - database level aggregation
+            post_types = posts_query.values('type').annotate(count=Count('id'))
+            post_types_dict = {item['type']: item['count'] for item in post_types}
+            
+            # Posts by day - database level aggregation
+            posts_by_day = posts_query.annotate(
+                day=TruncDay('created_at')
+            ).values('day').annotate(count=Count('id')).order_by('day')
+            
+            # Get engagement stats at database level instead of Python loop
+            likes_count_subquery = PostInteraction.objects.filter(
+                post=OuterRef('pk'),
+                interaction_type='LIKE'
+            ).values('post').annotate(count=Count('*')).values('count')
+            
+            comments_count_subquery = Comment.objects.filter(
+                post=OuterRef('pk')
+            ).values('post').annotate(count=Count('*')).values('count')
+            
+            engagement_stats = posts_query.annotate(
+                likes_count=Coalesce(Subquery(likes_count_subquery), 0),
+                comments_count=Coalesce(Subquery(comments_count_subquery), 0)
+            ).aggregate(
+                total_likes=Sum('likes_count'),
+                total_comments=Sum('comments_count'),
+                avg_likes=Avg('likes_count'),
+                avg_comments=Avg('comments_count')
+            )
+            
+            # Top authors - database level aggregation
+            top_authors = posts_query.values(
+                'author__id', 
+                'author__username', 
+                'author__first_name', 
+                'author__last_name'
+            ).annotate(
+                post_count=Count('id')
+            ).order_by('-post_count')[:5]
+            
+            # Most liked posts - use the annotated likes_count from above
+            most_liked_posts = posts_query.annotate(
+                likes_count=Coalesce(Subquery(likes_count_subquery), 0)
+            ).order_by('-likes_count')[:5]
+            
+            most_liked_posts_data = [
+                {
+                    'id': post.id,
+                    'title': post.title,
+                    'type': post.type,
+                    'likes_count': post.likes_count,
+                    'author': post.author.username
+                }
+                for post in most_liked_posts
+            ]
+            
+            # Most commented posts - use the annotated comments_count from above
+            most_commented_posts = posts_query.annotate(
+                comments_count=Coalesce(Subquery(comments_count_subquery), 0)
+            ).order_by('-comments_count')[:5]
+            
+            most_commented_posts_data = [
+                {
+                    'id': post.id,
+                    'title': post.title,
+                    'type': post.type,
+                    'comments_count': post.comments_count,
+                    'author': post.author.username
+                }
+                for post in most_commented_posts
+            ]
+            
+            result = {
+                'total_posts': total_posts,
+                'post_types': post_types_dict,
+                'posts_by_day': list(posts_by_day),
+                'engagement': {
+                    'total_likes': engagement_stats['total_likes'] or 0,
+                    'total_comments': engagement_stats['total_comments'] or 0,
+                    'avg_likes_per_post': engagement_stats['avg_likes'] or 0,
+                    'avg_comments_per_post': engagement_stats['avg_comments'] or 0,
+                },
+                'top_authors': list(top_authors),
+                'most_liked_posts': most_liked_posts_data,
+                'most_commented_posts': most_commented_posts_data,
             }
-            for post, likes_count in most_liked_posts
-        ]
-        
-        # Most commented posts
-        most_commented_posts = sorted(
-            [(post, post.comments.count()) for post in posts], 
-            key=lambda x: x[1], 
-            reverse=True
-        )[:5]
-        most_commented_posts = [
-            {
-                'id': post.id,
-                'title': post.title,
-                'type': post.type,
-                'comments_count': comments_count,
-                'author': post.author.username
-            }
-            for post, comments_count in most_commented_posts
-        ]
-        
-        return Response({
-            'total_posts': posts.count(),
-            'post_types': post_types_dict,
-            'posts_by_day': list(posts_by_day),
-            'engagement': {
-                'total_likes': total_likes,
-                'total_comments': total_comments,
-                'avg_likes_per_post': total_likes / posts.count() if posts.count() > 0 else 0,
-                'avg_comments_per_post': total_comments / posts.count() if posts.count() > 0 else 0,
-            },
-            'top_authors': list(top_authors),
-            'most_liked_posts': most_liked_posts,
-            'most_commented_posts': most_commented_posts,
-        })
+            
+            # Cache the result for 30 minutes
+            cache.set(cache_key, result, 30 * 60)
+            return Response(result)
+            
+        except Exception as e:
+            logger.error(f"Error getting post stats: {str(e)}", exc_info=True)
+            return Response(
+                {'error': f"Error retrieving post statistics: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
     @swagger_auto_schema(
         methods=['get'],
@@ -1263,8 +1324,9 @@ class AdminPanelViewSet(GenericViewSet):
         try:
             query = request.GET.get('q', '').strip()
             search_type = request.GET.get('type', 'all').lower()
+            use_simple_search = request.GET.get('simple', '').lower() == 'true'
 
-            logger.info(f"Admin search request - query: {query}, type: {search_type}")
+            logger.info(f"Admin search request - query: {query}, type: {search_type}, use_simple_search: {use_simple_search}")
 
             if not query:
                 logger.info("Empty query, returning empty results")
@@ -1281,24 +1343,45 @@ class AdminPanelViewSet(GenericViewSet):
                 'users': []
             }
 
-            # Use the main search implementation from SearchViewSet for consistency
-            from search.views import SearchViewSet
+            # Import the SearchViewSet and simple_search function
+            from search.views import SearchViewSet, simple_search
             search_viewset = SearchViewSet()
             search_viewset.request = request
 
             # Get users if requested
             if search_type in ['all', 'users']:
                 try:
-                    users_results = search_viewset._search_users(query)
-                    # Convert to admin serializer format
-                    user_ids = [user['id'] for user in users_results]
-                    if user_ids:
-                        users = User.objects.filter(id__in=user_ids)
+                    if use_simple_search:
+                        # Use simple search directly
+                        simple_user_results = simple_search(query, User, ['username', 'first_name', 'last_name', 'email', 'bio'], 40)
                         results['users'] = AdminUserSerializer(
-                            users,
+                            simple_user_results,
                             many=True,
                             context={'request': request}
                         ).data
+                    else:
+                        # First try the advanced search from SearchViewSet
+                        users_results = search_viewset._search_users(query)
+                        # Convert to admin serializer format
+                        user_ids = [user['id'] for user in users_results]
+                        
+                        if user_ids:
+                            users = User.objects.filter(id__in=user_ids)
+                            results['users'] = AdminUserSerializer(
+                                users,
+                                many=True,
+                                context={'request': request}
+                            ).data
+                        
+                        # Fallback to a basic search if we got no results
+                        if not results['users']:
+                            logger.info(f"No users found with advanced search, trying simple search for '{query}'")
+                            simple_user_results = simple_search(query, User, ['username', 'first_name', 'last_name', 'email', 'bio'], 40)
+                            results['users'] = AdminUserSerializer(
+                                simple_user_results,
+                                many=True,
+                                context={'request': request}
+                            ).data
                     
                     logger.info(f"Found {len(results['users'])} users")
                 except Exception as e:
@@ -1307,16 +1390,37 @@ class AdminPanelViewSet(GenericViewSet):
             # Get posts if requested
             if search_type in ['all', 'posts']:
                 try:
-                    posts_results = search_viewset._search_posts(query)
-                    # Convert to admin serializer format
-                    post_ids = [post['id'] for post in posts_results]
-                    if post_ids:
-                        posts = Post.objects.filter(id__in=post_ids)
+                    if use_simple_search:
+                        # Use simple search directly
+                        simple_post_results = simple_search(query, Post, ['title', 'description', 'content'], 40)
                         results['posts'] = AdminPostSerializer(
-                            posts,
+                            simple_post_results,
                             many=True,
                             context={'request': request}
                         ).data
+                    else:
+                        # First try the advanced search from SearchViewSet
+                        posts_results = search_viewset._search_posts(query)
+                        # Convert to admin serializer format
+                        post_ids = [post['id'] for post in posts_results]
+                        
+                        if post_ids:
+                            posts = Post.objects.filter(id__in=post_ids)
+                            results['posts'] = AdminPostSerializer(
+                                posts,
+                                many=True,
+                                context={'request': request}
+                            ).data
+                        
+                        # Fallback to a basic search if we got no results
+                        if not results['posts']:
+                            logger.info(f"No posts found with advanced search, trying simple search for '{query}'")
+                            simple_post_results = simple_search(query, Post, ['title', 'description', 'content'], 40)
+                            results['posts'] = AdminPostSerializer(
+                                simple_post_results,
+                                many=True,
+                                context={'request': request}
+                            ).data
                     
                     logger.info(f"Found {len(results['posts'])} posts")
                 except Exception as e:

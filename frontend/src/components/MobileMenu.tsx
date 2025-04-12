@@ -32,12 +32,7 @@ const MobileMenu = () => {
             className="absolute top-16 left-0 right-0 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 py-4"
           >
             <nav className="container mx-auto px-4">
-              <div className="flex items-center mb-4">
-                <div className="relative w-6 h-6">
-                  <Image src="/favicon.jpeg" alt="Eemu" fill className="object-contain" />
-                </div>
-                <span className="ml-2 font-semibold text-gray-900 dark:text-white">Eemu</span>
-              </div>
+    
               <ul className="space-y-4">
                 <li>
                   <Link 
@@ -64,6 +59,14 @@ const MobileMenu = () => {
                     onClick={() => setIsOpen(false)}
                   >
                     Contact
+                  </Link>
+                </li><li>
+                  <Link 
+                    href="/premium"
+                    className="block text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white"
+                    onClick={() => setIsOpen(false)}
+                  >
+                    Premium
                   </Link>
                 </li>
               </ul>

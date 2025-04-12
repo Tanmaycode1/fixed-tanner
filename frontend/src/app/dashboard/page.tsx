@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { toast } from 'react-hot-toast';
 import { userApi} from '@/services/api';
@@ -8,6 +8,7 @@ import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { User } from 'lucide-react';
 import { postsApi, type Post } from '@/services/postsApi';
+import React from 'react';
 
 // Components
 import { Sidebar } from '@/components/layout/Sidebar';
@@ -31,6 +32,14 @@ interface SuggestedUser {
   bio?: string;
 }
 
+// Add a FeedMetadata interface to properly type the metadata
+interface FeedMetadata {
+  has_more: boolean;
+  current_page: number;
+  sections_included: string[];
+  counts?: Record<string, number>;
+}
+
 export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [currentUser, setCurrentUser] = useState(null);
@@ -40,10 +49,87 @@ export default function DashboardPage() {
   const [isLoadingPosts, setIsLoadingPosts] = useState(true);
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
-
+  const [feedSections, setFeedSections] = useState<Record<string, Post[]>>({});
+  const [activeSections, setActiveSections] = useState<string[]>([]);
+  const [feedCacheTime, setFeedCacheTime] = useState<number | null>(null);
+  
+  // Reference to observe when user scrolls to bottom
+  const observerTarget = useRef<HTMLDivElement>(null);
+  
   useEffect(() => {
     loadUserProfile();
     loadSuggestions();
+    
+    // Check for cached feed data
+    const cachedFeed = localStorage.getItem('cachedFeed');
+    const cachedTime = localStorage.getItem('feedCacheTime');
+    
+    if (cachedFeed && cachedTime) {
+      try {
+        const parsedCache = JSON.parse(cachedFeed);
+        const parsedTime = parseInt(cachedTime);
+        const currentTime = Date.now();
+        
+        // Use cache if it's less than 5 minutes old
+        if (currentTime - parsedTime < 5 * 60 * 1000) {
+          console.log('Using cached feed data');
+          setPosts(parsedCache.posts || []);
+          setFeedSections(parsedCache.sections || {});
+          setActiveSections(parsedCache.activeSections || []);
+          setPage(parsedCache.page || 1);
+          setHasMore(parsedCache.hasMore || false);
+          setIsLoadingPosts(false);
+          setLoading(false);
+          setFeedCacheTime(parsedTime);
+          return;
+        }
+      } catch (error) {
+        console.error('Error parsing cached feed:', error);
+      }
+    }
+    
+    // If no valid cache exists, load fresh data
+    loadPosts();
+  }, []);
+
+  // Cache feed data function
+  const cacheFeedData = useCallback(() => {
+    const cacheData = {
+      posts,
+      sections: feedSections,
+      activeSections,
+      page,
+      hasMore,
+      timestamp: Date.now()
+    };
+    
+    try {
+      localStorage.setItem('cachedFeed', JSON.stringify(cacheData));
+      localStorage.setItem('feedCacheTime', Date.now().toString());
+      setFeedCacheTime(Date.now());
+    } catch (error) {
+      console.error('Error caching feed data:', error);
+    }
+  }, [posts, feedSections, activeSections, page, hasMore]);
+
+  // Update cache whenever feed data changes
+  useEffect(() => {
+    if (posts.length > 0 && !isLoadingPosts) {
+      cacheFeedData();
+    }
+  }, [posts, feedSections, activeSections, page, hasMore, isLoadingPosts, cacheFeedData]);
+
+  // Add a function to manually refresh the feed
+  const refreshFeed = useCallback(() => {
+    setIsLoadingPosts(true);
+    setPosts([]);
+    setFeedSections({});
+    setActiveSections([]);
+    setPage(1);
+    setHasMore(true);
+    localStorage.removeItem('cachedFeed');
+    localStorage.removeItem('feedCacheTime');
+    setFeedCacheTime(null);
     loadPosts();
   }, []);
 
@@ -76,41 +162,148 @@ export default function DashboardPage() {
   };
 
   const loadPosts = async (pageNum = 1) => {
+    if (!hasMore || (isLoadingPosts && pageNum > 1)) return Promise.resolve();
+    
     try {
       setIsLoadingPosts(true);
+      console.log(`Loading posts for page ${pageNum}`);
       const response = await postsApi.getFeed(pageNum);
       
       if (response.success && response.data) {
-        const { results, next } = response.data;
-        if (Array.isArray(results)) {
+        // Handle sectioned data (new format)
+        if (response.data.sections) {
+          const sections = response.data.sections;
+          const metadata = (response.data.metadata || {}) as FeedMetadata;
+          
+          // Update feed sections
           if (pageNum === 1) {
-            setPosts(results);
+            console.log('First page load, replacing all content');
+            // First page, replace all sections
+            setFeedSections(sections);
+            setActiveSections(metadata.sections_included || Object.keys(sections));
+            
+            // Combine all sections for flat feed view
+            const allPosts = Object.values(sections).flat();
+            setPosts(allPosts);
           } else {
-            setPosts(prev => [...prev, ...results]);
+            console.log(`Loading more posts: page ${pageNum}`);
+            // Additional pages, merge with existing sections
+            setFeedSections(prevSections => {
+              const updatedSections = { ...prevSections };
+              
+              // Merge each section
+              Object.entries(sections).forEach(([sectionKey, sectionPosts]) => {
+                const existingPosts = updatedSections[sectionKey] || [];
+                const existingIds = new Set(existingPosts.map(post => post.id));
+                
+                // Filter out duplicates
+                const newPosts = sectionPosts.filter(post => !existingIds.has(post.id));
+                console.log(`Adding ${newPosts.length} new posts to section ${sectionKey}`);
+                
+                // Merge with existing posts
+                updatedSections[sectionKey] = [...existingPosts, ...newPosts];
+              });
+              
+              return updatedSections;
+            });
+            
+            // Update active sections if new ones are available
+            if (metadata.sections_included && metadata.sections_included.length > 0) {
+              setActiveSections(prevSections => {
+                const newSections = new Set([...prevSections, ...metadata.sections_included]);
+                return Array.from(newSections);
+              });
+            }
+            
+            // Combine all new sections for flat feed view and append to existing posts
+            const newPosts = Object.values(sections).flat();
+            setPosts(prev => {
+              const existingIds = new Set(prev.map(post => post.id));
+              const uniqueNewPosts = newPosts.filter(post => !existingIds.has(post.id));
+              console.log(`Adding ${uniqueNewPosts.length} unique new posts to feed`);
+              return [...prev, ...uniqueNewPosts];
+            });
           }
+          
+          // Update pagination state
+          setHasMore(metadata.has_more || false);
+          setPage(pageNum);
+          console.log(`Has more: ${metadata.has_more}, Current page: ${pageNum}`);
+        }
+        // Handle standard results array (backward compatibility)
+        else if (Array.isArray(response.data.results)) {
+          const { results, next } = response.data;
+          
+          if (pageNum === 1) {
+            console.log('First page load (legacy format), replacing all content');
+            setPosts(results);
+            // Create a single section for backward compatibility
+            setFeedSections({ all: results });
+            setActiveSections(['all']);
+          } else {
+            console.log(`Loading more posts (legacy format): page ${pageNum}`);
+            // Add new posts while avoiding duplicates
+            setPosts(prev => {
+              const existingIds = new Set(prev.map(post => post.id));
+              const uniqueNewPosts = results.filter(post => !existingIds.has(post.id));
+              console.log(`Adding ${uniqueNewPosts.length} unique new posts to feed`);
+              return [...prev, ...uniqueNewPosts];
+            });
+            
+            // Update the single section
+            setFeedSections(prev => {
+              const existingPosts = prev.all || [];
+              const existingIds = new Set(existingPosts.map(post => post.id));
+              const uniqueNewPosts = results.filter(post => !existingIds.has(post.id));
+              
+              return {
+                ...prev,
+                all: [...existingPosts, ...uniqueNewPosts]
+              };
+            });
+          }
+          
+          // Update pagination state
           setHasMore(!!next);
           setPage(pageNum);
-        } else {
-          setPosts([]);
-          setHasMore(false);
+          console.log(`Has more: ${!!next}, Current page: ${pageNum}`);
+        } 
+        // No valid data found
+        else {
+          if (pageNum === 1) {
+            console.log('No valid data found, clearing feed');
+            setPosts([]);
+            setFeedSections({});
+            setActiveSections([]);
+            setHasMore(false);
+          } else {
+            console.log('No more data to load');
+            setHasMore(false);
+          }
         }
       } else {
-        toast.error('Failed to load posts');
-        setPosts([]);
+        if (pageNum === 1) {
+          toast.error('Failed to load posts');
+          setPosts([]);
+          setFeedSections({});
+          setActiveSections([]);
+        } else {
+          console.error('Failed to load more posts');
+        }
       }
     } catch (error) {
       console.error('Error loading posts:', error);
-      toast.error('Failed to load posts');
-      setPosts([]);
+      if (pageNum === 1) {
+        toast.error('Failed to load posts');
+        setPosts([]);
+        setFeedSections({});
+        setActiveSections([]);
+      }
     } finally {
       setIsLoadingPosts(false);
     }
-  };
-
-  const handleLoadMore = () => {
-    if (!isLoadingPosts && hasMore) {
-      loadPosts(page + 1);
-    }
+    
+    return Promise.resolve(); // Return a resolved promise for chaining
   };
 
   const handlePostUpdate = (updatedPost: Post) => {
@@ -118,6 +311,160 @@ export default function DashboardPage() {
       prevPosts.map(post => 
         post.id === updatedPost.id ? updatedPost : post
       )
+    );
+  };
+  
+  // Infinite scroll observer setup
+  const handleObserver = useCallback((entries: IntersectionObserverEntry[]) => {
+    const [entry] = entries;
+    if (entry?.isIntersecting && hasMore && !isLoadingPosts) {
+      // Store current scroll position and document height before loading more
+      const scrollPosition = window.scrollY;
+      const documentHeight = document.documentElement.scrollHeight;
+      
+      // Increment page and load more posts
+      const nextPage = page + 1;
+      
+      // Load more posts (loading state is managed inside loadPosts)
+      loadPosts(nextPage).then(() => {
+        // After posts are loaded and DOM is updated
+        setTimeout(() => {
+          // Calculate new document height
+          const newDocumentHeight = document.documentElement.scrollHeight;
+          // Calculate how much the document height has changed
+          const heightDifference = newDocumentHeight - documentHeight;
+          
+          // Log for debugging
+          console.log(`Previous height: ${documentHeight}, New height: ${newDocumentHeight}, Difference: ${heightDifference}`);
+          
+          // Restore scroll position, compensating for new content
+          window.scrollTo({
+            top: scrollPosition,
+            behavior: 'auto' // Use 'auto' to avoid animation
+          });
+          
+          // Log the scroll position
+          console.log(`Restored scroll position to: ${scrollPosition}`);
+        }, 100); // Small delay to ensure DOM updates are complete
+      });
+    }
+  }, [hasMore, isLoadingPosts, page, loadPosts]);
+  
+  useEffect(() => {
+    const observer = new IntersectionObserver(handleObserver, {
+      root: null,
+      rootMargin: '100px', // Start loading a bit before reaching the end
+      threshold: 0.1,
+    });
+    
+    if (observerTarget.current) {
+      observer.observe(observerTarget.current);
+    }
+    
+    return () => {
+      if (observerTarget.current) {
+        observer.unobserve(observerTarget.current);
+      }
+    };
+  }, [handleObserver, observerTarget]);
+
+  // Memoize posts to prevent unnecessary re-renders
+  const memoizedPosts = React.useMemo(() => posts, [posts]);
+
+  // Get section title for display
+  const getSectionTitle = (section: string): string => {
+    const titles: Record<string, string> = {
+      following: "From People You Follow",
+      recommended: "Recommended For You",
+      trending: "Trending Now",
+      discover: "Discover",
+      fallback: "Popular Content",
+      all: "Your Feed"
+    };
+    return titles[section] || section.charAt(0).toUpperCase() + section.slice(1);
+  };
+
+  // Render section header
+  const renderSectionHeader = (section: string, postCount: number) => {
+    if (postCount === 0) return null;
+    
+    return (
+      <motion.div 
+        key={`header-${section}`}
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="mb-4 px-1"
+      >
+        <h2 className="text-xl font-semibold text-gray-900 dark:text-white">
+          {getSectionTitle(section)}
+        </h2>
+      </motion.div>
+    );
+  };
+
+  // Render posts grouped by section
+  const renderPostsBySection = () => {
+    // If we have only one section or in mobile view, render flat list
+    if (activeSections.length <= 1) {
+      return (
+        <AnimatePresence mode="popLayout" initial={false}>
+          {memoizedPosts.map((post, index) => (
+            <motion.div
+              key={post.id}
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -20 }}
+              transition={{ 
+                type: "spring",
+                stiffness: 300,
+                damping: 30,
+                delay: Math.min(0.05 * (index % 3), 0.15)
+              }}
+              layoutId={post.id}
+              className="mb-4"
+            >
+              <PostCard post={post} onPostUpdate={handlePostUpdate} />
+            </motion.div>
+          ))}
+        </AnimatePresence>
+      );
+    }
+    
+    // On larger screens, group by section
+    return (
+      <>
+        {activeSections.map(section => {
+          const sectionPosts = feedSections[section] || [];
+          if (sectionPosts.length === 0) return null;
+          
+          return (
+            <div key={`section-${section}`} className="mb-8">
+              {renderSectionHeader(section, sectionPosts.length)}
+              
+              <AnimatePresence mode="popLayout" initial={false}>
+                {sectionPosts.map((post, index) => (
+                  <motion.div
+                    key={post.id}
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -20 }}
+                    transition={{ 
+                      type: "spring",
+                      stiffness: 300,
+                      damping: 30,
+                      delay: Math.min(0.05 * (index % 3), 0.15)
+                    }}
+                    layoutId={post.id}
+                    className="mb-4"
+                  >
+                    <PostCard post={post} onPostUpdate={handlePostUpdate} />
+                  </motion.div>
+                ))}
+              </AnimatePresence>
+            </div>
+          );
+        })}
+      </>
     );
   };
 
@@ -148,16 +495,12 @@ export default function DashboardPage() {
               <span className="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-primary-600 to-primary-400">
                 Eemu
               </span>
-              {/* <button
-                onClick={toggleTheme}
+              <button
+                onClick={refreshFeed}
                 className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
               >
-                {theme === 'dark' ? (
-                  <Sun className="h-5 w-5 text-gray-600 dark:text-gray-400" />
-                ) : (
-                  <Moon className="h-5 w-5 text-gray-600 dark:text-gray-400" />
-                )}
-              </button> */}
+                <Loader className={`h-5 w-5 text-gray-600 dark:text-gray-400 ${isLoadingPosts ? 'animate-spin' : ''}`} />
+              </button>
             </div>
           </div>
         </div>
@@ -166,6 +509,25 @@ export default function DashboardPage() {
         <main className="flex-1 lg:pl-64">
           <div className="min-h-screen pt-16 lg:pt-0">
             <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+              {/* Cache indicator and refresh button (desktop) */}
+              {feedCacheTime && (
+                <div className="hidden lg:flex items-center justify-between mb-6">
+                  <div className="text-sm text-gray-500 dark:text-gray-400">
+                    <span>Last updated: {new Date(feedCacheTime).toLocaleTimeString()}</span>
+                  </div>
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    onClick={refreshFeed}
+                    disabled={isLoadingPosts}
+                    className="flex items-center gap-2"
+                  >
+                    <Loader className={`h-4 w-4 ${isLoadingPosts ? 'animate-spin' : ''}`} />
+                    {isLoadingPosts ? 'Refreshing...' : 'Refresh Feed'}
+                  </Button>
+                </div>
+              )}
+              
               <div className="grid grid-cols-1 lg:grid-cols-3 xl:grid-cols-4 gap-6">
                 {/* Feed Section */}
                 <div className="lg:col-span-2 xl:col-span-3 space-y-6">
@@ -194,42 +556,27 @@ export default function DashboardPage() {
                     </div>
                   ) : (
                     <>
-                      <AnimatePresence mode="popLayout">
-                        {posts.map((post, index) => (
+                      {renderPostsBySection()}
+                      
+                      {/* Loading indicator for infinite scroll */}
+                      <div ref={observerTarget} className="h-10 flex items-center justify-center">
+                        {isLoadingPosts && hasMore && (
                           <motion.div
-                            key={post.id}
-                            initial={{ opacity: 0, y: 20 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            exit={{ opacity: 0, y: -20 }}
-                            transition={{ delay: index * 0.1 }}
+                            initial={{ opacity: 0, scale: 0.8 }}
+                            animate={{ opacity: 1, scale: 1 }}
+                            className="py-4"
                           >
-                            <PostCard post={post} onPostUpdate={handlePostUpdate} />
+                            <Loader className="h-6 w-6 animate-spin text-primary-500/70 dark:text-primary-400/70" />
                           </motion.div>
-                        ))}
-                      </AnimatePresence>
+                        )}
+                      </div>
 
-                      {(hasMore || isLoadingPosts) && (
-                        <div className="flex justify-center py-6">
-                          <Button
-                            variant="outline"
-                            onClick={handleLoadMore}
-                            disabled={isLoadingPosts}
-                            className="min-w-[120px]"
-                          >
-                            {isLoadingPosts ? (
-                              <Loader className="h-4 w-4 animate-spin" />
-                            ) : (
-                              'Load More'
-                            )}
-                          </Button>
-                        </div>
-                      )}
-
+                      {/* End of feed message */}
                       {!hasMore && posts.length > 0 && (
                         <motion.div
                           initial={{ opacity: 0 }}
                           animate={{ opacity: 1 }}
-                          transition={{ delay: 0.5 }}
+                          transition={{ delay: 0.3 }}
                         >
                           <CaughtUpAnimation />
                         </motion.div>

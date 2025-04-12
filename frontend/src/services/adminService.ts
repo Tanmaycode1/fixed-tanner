@@ -799,7 +799,9 @@ export class AdminService {
         headers: this.getHeaders(),
         params: { 
           q: query,
-          type: type
+          type: type,
+          simple: true,   // Always use simple search
+          refresh: true   // Always bypass cache
         },
         withCredentials: true,
         timeout: 15000 // Increased timeout for search

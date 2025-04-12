@@ -34,22 +34,36 @@ AWS_SECRET_ACCESS_KEY = os.environ.get('AWS_SECRET_ACCESS_KEY')
 AWS_STORAGE_BUCKET_NAME = os.environ.get('AWS_STORAGE_BUCKET_NAME')
 AWS_S3_REGION_NAME = os.environ.get('AWS_S3_REGION_NAME')
 AWS_S3_FILE_OVERWRITE = False
-AWS_DEFAULT_ACL = 'private'
+AWS_DEFAULT_ACL = 'public-read'  # Make all objects publicly readable by default
 AWS_S3_VERIFY = True
+AWS_S3_CUSTOM_DOMAIN = f'{AWS_STORAGE_BUCKET_NAME}.s3.{AWS_S3_REGION_NAME}.amazonaws.com'
+AWS_QUERYSTRING_AUTH = False  # Don't add authentication parameters to URLs
 
 # Use S3 for storage only if all required credentials are provided
 if AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY and AWS_STORAGE_BUCKET_NAME and AWS_S3_REGION_NAME:
-    DEFAULT_FILE_STORAGE = 'storages.backends.s3boto3.S3Boto3Storage'
-    STATICFILES_STORAGE = 'storages.backends.s3boto3.S3StaticStorage'
-    # Add error handling for S3
-    AWS_S3_CUSTOM_DOMAIN = f'{AWS_STORAGE_BUCKET_NAME}.s3.{AWS_S3_REGION_NAME}.amazonaws.com'
+    # Define separate folders in the bucket for static and media files
+    AWS_STATIC_LOCATION = 'static'
+    AWS_MEDIA_LOCATION = ''  # No location prefix needed
+    
+    # Add caching parameters
     AWS_S3_OBJECT_PARAMETERS = {
         'CacheControl': 'max-age=86400',
     }
+    
+    # Set storage classes to use these locations
+    STATICFILES_STORAGE = 'core.storage_backends.StaticStorage'
+    DEFAULT_FILE_STORAGE = 'core.storage_backends.MediaStorage'
+    
+    # Static and media URLs will point to S3
+    STATIC_URL = f'https://{AWS_S3_CUSTOM_DOMAIN}/{AWS_STATIC_LOCATION}/'
+    MEDIA_URL = f'https://{AWS_S3_CUSTOM_DOMAIN}/'  # Root URL without media prefix
 else:
     # Fallback to local storage if S3 credentials are missing
     DEFAULT_FILE_STORAGE = 'django.core.files.storage.FileSystemStorage'
     STATICFILES_STORAGE = 'django.contrib.staticfiles.storage.StaticFilesStorage'
+    STATIC_URL = '/static/'
+    MEDIA_URL = '/media/'
+    STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
 
 # Email settings
 EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'

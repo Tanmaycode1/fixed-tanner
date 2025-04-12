@@ -68,6 +68,13 @@ interface PaginatedResponse<T> {
   next: string | null;
   previous: string | null;
   results: T[];
+  sections?: Record<string, T[]>;
+  metadata?: {
+    has_more: boolean;
+    current_page: number;
+    sections_included: string[];
+    counts?: Record<string, number>;
+  };
 }
 
 interface TrendingSearch {
@@ -202,9 +209,34 @@ export const postsApi = {
   getFeed: async (page = 1): Promise<ApiResponse<PaginatedResponse<Post>>> => {
     try {
       const response = await api.get(`/api/posts/feed/?page=${page}`);
+      
+      // Check if the response contains the new sectioned format
+      if (response.data?.data?.sections) {
+        // Extract the posts from the first available section
+        const sections = response.data.data.sections;
+        const firstSectionKey = Object.keys(sections)[0];
+        const posts = firstSectionKey ? sections[firstSectionKey] : [];
+        
+        // Create a format compatible with the PaginatedResponse interface
+        return {
+          success: true,
+          data: {
+            results: posts,
+            count: posts.length,
+            next: response.data.data.metadata?.has_more ? `page=${page + 1}` : null,
+            previous: page > 1 ? `page=${page - 1}` : null,
+            // Include the original response data for components that need the sectioned format
+            sections: sections,
+            metadata: response.data.data.metadata
+          },
+          status: response.status
+        };
+      }
+      
+      // Backward compatibility format
       return {
         success: true,
-        data: response.data,
+        data: response.data.data || response.data,
         status: response.status
       };
     } catch (error: unknown) {
@@ -315,7 +347,12 @@ export const postsApi = {
   search: async (query: string, type: string = 'all'): Promise<ApiResponse<SearchResponse>> => {
     try {
       const response = await api.get('/api/search/', {
-        params: { q: query, type }
+        params: { 
+          q: query, 
+          type,
+          simple: true,   // Always use simple search
+          refresh: true   // Always bypass cache
+        }
       });
       
       return {
@@ -490,6 +527,46 @@ export const postsApi = {
           trending_audio: null,
           featured_post: null
         }
+      };
+    }
+  },
+
+  deletePost: async (postId: string): Promise<ApiResponse> => {
+    try {
+      const response = await api.delete(`/api/posts/${postId}/`);
+      return {
+        success: true,
+        data: response.data,
+        status: response.status
+      };
+    } catch (error: unknown) {
+      const axiosError = error as AxiosError<ApiErrorResponse>;
+      
+      console.error('Delete Post Error:', error);
+      return {
+        success: false,
+        error: axiosError.response?.data?.message || 'Failed to delete post',
+        status: axiosError.response?.status
+      };
+    }
+  },
+  
+  patchPost: async (postId: string, formData: FormData): Promise<ApiResponse<Post>> => {
+    try {
+      const response = await api.patch(`/api/posts/${postId}/`, formData);
+      return {
+        success: true,
+        data: response.data,
+        status: response.status
+      };
+    } catch (error: unknown) {
+      const axiosError = error as AxiosError<ApiErrorResponse>;
+      
+      console.error('Patch Post Error:', error);
+      return {
+        success: false,
+        error: axiosError.response?.data?.message || 'Failed to update post',
+        status: axiosError.response?.status
       };
     }
   }

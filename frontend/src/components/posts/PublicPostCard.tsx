@@ -1,9 +1,17 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Heart, MessageCircle, Share2, Bookmark } from "lucide-react";
+import { Heart, MessageCircle, Share2, Bookmark, ChevronRight, MoreHorizontal, Copy, Flag } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { toast } from "react-hot-toast";
 import { cn } from "@/lib/utils";
 import type { Post } from '@/services/postsApi';
 import { default as NextImage } from 'next/image';
@@ -44,11 +52,40 @@ const getTimeAgo = (date: string) => {
   return 'now';
 };
 
+// Character limit for post descriptions
+const DESCRIPTION_CHAR_LIMIT = 150;
+
 export function PublicPostCard({ post }: PublicPostCardProps) {
   const router = useRouter();
+  const [expanded, setExpanded] = useState(false);
+  
+  const isDescriptionLong = post.description && post.description.length > DESCRIPTION_CHAR_LIMIT;
+  const displayDescription = !expanded && isDescriptionLong
+    ? `${post.description.substring(0, DESCRIPTION_CHAR_LIMIT)}...`
+    : post.description;
 
   const redirectToLogin = () => {
     router.push('/auth/login');
+  };
+
+  const handleShare = () => {
+    redirectToLogin();
+  };
+
+  const handleBookmark = () => {
+    redirectToLogin();
+    toast.success('Please login to save posts', {
+      icon: '🔖',
+    });
+  };
+
+  const copyPostLink = () => {
+    // Create a full URL including the post ID
+    const baseUrl = window.location.origin;
+    const postUrl = `${baseUrl}/posts/${post.id}`;
+    
+    navigator.clipboard.writeText(postUrl);
+    toast.success('Post link copied!');
   };
 
   return (
@@ -103,6 +140,43 @@ export function PublicPostCard({ post }: PublicPostCardProps) {
             )}
           </div>
         </div>
+
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button 
+              variant="ghost" 
+              size="icon"
+              className="text-gray-600 hover:text-gray-900 dark:text-gray-300 dark:hover:text-white"
+            >
+              <MoreHorizontal className="h-5 w-5" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-56">
+            <DropdownMenuItem onClick={copyPostLink}>
+              <Copy className="h-4 w-4 mr-2" />
+              Copy link
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={handleShare}>
+              <Share2 className="h-4 w-4 mr-2" />
+              Share post
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={handleBookmark}>
+              <Bookmark className="h-4 w-4 mr-2" />
+              Save post
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem 
+              className="text-red-500 dark:text-red-400"
+              onClick={() => {
+                redirectToLogin();
+                toast.error('Please login to report posts');
+              }}
+            >
+              <Flag className="h-4 w-4 mr-2" />
+              Report post
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
 
       {/* Post Content */}
@@ -112,9 +186,21 @@ export function PublicPostCard({ post }: PublicPostCardProps) {
           <h2 className="text-xl font-semibold text-gray-900 dark:text-white leading-tight">
             {post.title}
           </h2>
-          <p className="text-gray-600 dark:text-gray-300 leading-relaxed">
-            {post.description}
-          </p>
+          <div>
+            <p className="text-gray-600 dark:text-gray-300 leading-relaxed">
+              {displayDescription}
+            </p>
+            {isDescriptionLong && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={redirectToLogin}
+                className="mt-2 text-primary-600 dark:text-primary-400 hover:text-primary-700 dark:hover:text-primary-300 p-0 h-auto font-medium flex items-center"
+              >
+                Read more <ChevronRight className="h-4 w-4 ml-1" />
+              </Button>
+            )}
+          </div>
         </div>
 
         {/* Image */}

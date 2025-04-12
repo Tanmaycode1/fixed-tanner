@@ -14,6 +14,8 @@ import {
   Edit2,
   ChevronRight,
   Lock,
+  X,
+  Check
 } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -108,6 +110,10 @@ export function PostCard({ post, expanded = false, onPostUpdate, isLandingPage =
   const [editingCommentId, setEditingCommentId] = useState<string | null>(null);
   const [editedContent, setEditedContent] = useState('');
   const [showFullDescription, setShowFullDescription] = useState(expanded);
+  const [isEditing, setIsEditing] = useState(false);
+  const [editedTitle, setEditedTitle] = useState('');
+  const [editedDescription, setEditedDescription] = useState('');
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
 
   // Check if description is truncated
   const isTruncatedDescription = localPost.description?.length > MAX_DESCRIPTION_LENGTH;
@@ -409,6 +415,82 @@ export function PostCard({ post, expanded = false, onPostUpdate, isLandingPage =
     }
   };
 
+  // Check if the current user is the author of the post
+  const isPostAuthor = currentUser && post.author && currentUser.id === post.author.id;
+
+  // Start editing the post
+  const handleStartEdit = () => {
+    setEditedTitle(localPost.title);
+    setEditedDescription(localPost.description);
+    setIsEditing(true);
+  };
+  
+  // Cancel editing
+  const handleCancelEdit = () => {
+    setIsEditing(false);
+  };
+  
+  // Save edit changes
+  const handleSaveEdit = async () => {
+    if (!editedTitle.trim() || !editedDescription.trim()) {
+      toast.error('Title and description cannot be empty');
+      return;
+    }
+    
+    try {
+      setIsSavingEdit(true);
+      
+      const formData = new FormData();
+      formData.append('title', editedTitle);
+      formData.append('description', editedDescription);
+      formData.append('type', localPost.type);
+      
+      const result = await postsApi.patchPost(localPost.id, formData);
+      
+      if (result.status === 200) {
+        // Update the local post
+        const updatedPost = {
+          ...localPost,
+          title: editedTitle,
+          description: editedDescription
+        };
+        
+        setLocalPost(updatedPost);
+        if (onPostUpdate) onPostUpdate(updatedPost);
+        
+        setIsEditing(false);
+        toast.success('Post updated successfully');
+      } else {
+        toast.error('Failed to update post');
+      }
+    } catch (error) {
+      console.error('Edit post error:', error);
+      toast.error('Failed to update post');
+    } finally {
+      setIsSavingEdit(false);
+    }
+  };
+
+  const handleDeletePost = async () => {
+    if (!isPostAuthor) return;
+    
+    if (confirm('Are you sure you want to delete this post? This action cannot be undone.')) {
+      try {
+        const result = await postsApi.deletePost(localPost.id);
+        if (result.success) {
+          toast.success('Post deleted successfully');
+          // Redirect to dashboard instead of home
+          router.push('/dashboard');
+        } else {
+          toast.error(result.error || 'Failed to delete post');
+        }
+      } catch (error) {
+        console.error('Delete post error:', error);
+        toast.error('Failed to delete post');
+      }
+    }
+  };
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
@@ -478,174 +560,236 @@ export function PostCard({ post, expanded = false, onPostUpdate, isLandingPage =
             <Button 
               variant="ghost" 
               size="icon"
-              className="text-gray-600 hover:text-gray-900 dark:text-gray-300 dark:hover:text-white"
+              className="text-gray-600 hover:text-gray-900 dark:text-gray-300 dark:hover:text-white focus:ring-0 focus:ring-offset-0"
             >
               <MoreHorizontal className="h-5 w-5" />
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-56">
-            <DropdownMenuItem onClick={() => {
-              navigator.clipboard.writeText(window.location.href);
-              toast.success('Link copied!');
-            }}>
-              <Copy className="h-4 w-4 mr-2" />
-              Copy link
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={handleShare}>
-              <Share2 className="h-4 w-4 mr-2" />
-              Share post
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={handleBookmark}>
-              <Bookmark className="h-4 w-4 mr-2" />
-              {isBookmarked ? 'Remove bookmark' : 'Save post'}
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
+          <DropdownMenuContent 
+            align="end" 
+            className="w-56 bg-white dark:bg-gray-800 shadow-lg rounded-lg border border-gray-200 dark:border-gray-700 py-1 overflow-hidden"
+          >
             <DropdownMenuItem 
-              className="text-red-500 dark:text-red-400"
-              onClick={() => toast.error('Report submitted')}
+              onClick={() => {
+                const baseUrl = window.location.origin;
+                const postUrl = `${baseUrl}/posts/${localPost.id}`;
+                navigator.clipboard.writeText(postUrl);
+                toast.success('Link copied!');
+              }}
+              className="flex items-center h-10 px-3 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
             >
-              <Flag className="h-4 w-4 mr-2" />
-              Report post
+              <Copy className="h-4 w-4 mr-2" />
+              <span className="text-sm">Copy link</span>
             </DropdownMenuItem>
+            
+            {isPostAuthor && (
+              <>
+                <DropdownMenuSeparator className="h-px bg-gray-100 dark:bg-gray-700 my-1" />
+                <DropdownMenuItem 
+                  onClick={handleStartEdit}
+                  className="flex items-center h-10 px-3 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                >
+                  <Edit2 className="h-4 w-4 mr-2" />
+                  <span className="text-sm">Edit post</span>
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={handleDeletePost}
+                  className="flex items-center h-10 px-3 cursor-pointer hover:bg-red-50 dark:hover:bg-red-900/20 text-red-500 dark:text-red-400 transition-colors"
+                >
+                  <Trash2 className="h-4 w-4 mr-2" />
+                  <span className="text-sm">Delete post</span>
+                </DropdownMenuItem>
+              </>
+            )}
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
 
       {/* Post Content */}
       <div className="p-6 space-y-4 text-gray-800 dark:text-gray-200">
-        {/* Title & Description */}
-        <div className="space-y-2">
-          <h2 className="text-xl font-semibold text-gray-900 dark:text-white leading-tight">
-            {localPost.title}
-          </h2>
-          <div className="relative">
-            <p className="text-gray-600 dark:text-gray-300 leading-relaxed">
-              {displayDescription}
-            </p>
-            {!expanded && isTruncatedDescription && !showFullDescription && (
-              <div className="mt-2">
-                <Button 
-                  variant="link" 
-                  className="text-blue-500 dark:text-blue-400 p-0 h-auto font-medium flex items-center"
-                  onClick={navigateToPostDetail}
-                >
-                  Read more <ChevronRight className="h-4 w-4 ml-1" />
-                </Button>
+        {isEditing ? (
+          <div className="space-y-4">
+            <input
+              type="text"
+              value={editedTitle}
+              onChange={(e) => setEditedTitle(e.target.value)}
+              className="w-full px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-xl font-semibold focus:outline-none focus:ring-2 focus:ring-primary-500"
+              placeholder="Title"
+            />
+            
+            <textarea
+              value={editedDescription}
+              onChange={(e) => setEditedDescription(e.target.value)}
+              rows={4}
+              className="w-full px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 focus:outline-none focus:ring-2 focus:ring-primary-500 resize-none"
+              placeholder="Description"
+            />
+            
+            <div className="flex justify-end space-x-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleCancelEdit}
+                className="flex items-center"
+                disabled={isSavingEdit}
+              >
+                <X className="h-4 w-4 mr-1" />
+                Cancel
+              </Button>
+              
+              <Button
+                variant="default"
+                size="sm"
+                onClick={handleSaveEdit}
+                className="flex items-center"
+                disabled={isSavingEdit}
+              >
+                {isSavingEdit ? (
+                  <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                ) : (
+                  <Check className="h-4 w-4 mr-1" />
+                )}
+                Save
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <>
+            {/* Title & Description */}
+            <div className="space-y-2">
+              <h2 className="text-xl font-semibold text-gray-900 dark:text-white leading-tight">
+                {localPost.title}
+              </h2>
+              <div className="relative">
+                <p className="text-gray-600 dark:text-gray-300 leading-relaxed">
+                  {displayDescription}
+                </p>
+                {!expanded && isTruncatedDescription && !showFullDescription && (
+                  <div className="mt-2">
+                    <Button 
+                      variant="link" 
+                      className="text-blue-500 dark:text-blue-400 p-0 h-auto font-medium flex items-center"
+                      onClick={navigateToPostDetail}
+                    >
+                      Read more <ChevronRight className="h-4 w-4 ml-1" />
+                    </Button>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Only show image here for NEWS posts */}
+            {shouldShowMainImage(localPost) && postImageUrl && (
+              <div className="relative aspect-video">
+                <img
+                  src={postImageUrl}
+                  alt={localPost.title}
+                  className="w-full h-full object-cover rounded-lg"
+                />
               </div>
             )}
-          </div>
-        </div>
 
-        {/* Only show image here for NEWS posts */}
-        {shouldShowMainImage(localPost) && postImageUrl && (
-          <div className="relative aspect-video">
-            <img
-              src={postImageUrl}
-              alt={localPost.title}
-              className="w-full h-full object-cover rounded-lg"
-            />
-          </div>
-        )}
-
-        {/* Audio Player (will handle its own image display) */}
-        {localPost.type === 'AUDIO' && (
-          <div className="mt-4 relative">
-            <AudioPlayer
-              audioUrl={localPost.audio_url || ''}
-              coverImage={audioImageUrl}
-              title={localPost.title}
-              post={localPost}
-            />
-          </div>
-        )}
-
-        {/* Engagement Stats */}
-        <div className="flex items-center justify-between pt-4">
-          <div className="flex items-center space-x-6">
-            {/* Like Button */}
-            <motion.button
-              whileTap={{ scale: 0.95 }}
-              onClick={handleLike}
-              disabled={isLoading}
-              className={cn(
-                "flex items-center space-x-2",
-                "text-gray-600 dark:text-gray-300",
-                "hover:text-red-500 dark:hover:text-red-400",
-                "transition-colors duration-200",
-                localPost.is_liked && "text-red-500 dark:text-red-400",
-                isLoading && "opacity-50 cursor-not-allowed"
-              )}
-            >
-              <motion.div
-                animate={{ 
-                  scale: localPost.is_liked ? [1, 1.4, 1] : 1,
-                  rotate: localPost.is_liked ? [0, 15, -15, 0] : 0
-                }}
-                transition={{ duration: 0.4 }}
-              >
-                <Heart 
-                  className={cn(
-                    "h-5 w-5",
-                    localPost.is_liked && "fill-current"
-                  )}
+            {/* Audio Player (will handle its own image display) */}
+            {localPost.type === 'AUDIO' && (
+              <div className="mt-4 relative">
+                <AudioPlayer
+                  audioUrl={localPost.audio_url || ''}
+                  coverImage={audioImageUrl}
+                  title={localPost.title}
+                  post={localPost}
                 />
-              </motion.div>
-              <span className="text-sm font-medium">
-                {formatNumber(localPost.likes_count)}
-              </span>
-            </motion.button>
+              </div>
+            )}
+          </>
+        )}
 
-            {/* Comments Button */}
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={toggleComments}
-              className={cn(
-                "flex items-center space-x-2",
-                "text-gray-600 dark:text-gray-300",
-                "hover:text-blue-500 dark:hover:text-blue-400",
-                "hover:bg-blue-50 dark:hover:bg-blue-900/20",
-                showComments && "text-blue-500 dark:text-blue-400"
-              )}
-            >
-              <MessageCircle className={cn(
-                "h-5 w-5",
-                showComments && "fill-current"
-              )} />
-              <span className="text-sm font-medium">
-                {formatNumber(localPost.comments_count)}
-              </span>
-            </Button>
+        {/* Engagement Stats - Only show if not editing */}
+        {!isEditing && (
+          <div className="flex items-center justify-between pt-4">
+            <div className="flex items-center space-x-6">
+              {/* Like Button */}
+              <motion.button
+                whileTap={{ scale: 0.95 }}
+                onClick={handleLike}
+                disabled={isLoading}
+                className={cn(
+                  "flex items-center space-x-2",
+                  "text-gray-600 dark:text-gray-300",
+                  "hover:text-red-500 dark:hover:text-red-400",
+                  "transition-colors duration-200",
+                  localPost.is_liked && "text-red-500 dark:text-red-400",
+                  isLoading && "opacity-50 cursor-not-allowed"
+                )}
+              >
+                <motion.div
+                  animate={{ 
+                    scale: localPost.is_liked ? [1, 1.4, 1] : 1,
+                    rotate: localPost.is_liked ? [0, 15, -15, 0] : 0
+                  }}
+                  transition={{ duration: 0.4 }}
+                >
+                  <Heart 
+                    className={cn(
+                      "h-5 w-5",
+                      localPost.is_liked && "fill-current"
+                    )}
+                  />
+                </motion.div>
+                <span className="text-sm font-medium">
+                  {formatNumber(localPost.likes_count)}
+                </span>
+              </motion.button>
 
-           
+              {/* Comments Button */}
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={toggleComments}
+                className={cn(
+                  "flex items-center space-x-2",
+                  "text-gray-600 dark:text-gray-300",
+                  "hover:text-blue-500 dark:hover:text-blue-400",
+                  "hover:bg-blue-50 dark:hover:bg-blue-900/20",
+                  showComments && "text-blue-500 dark:text-blue-400"
+                )}
+              >
+                <MessageCircle className={cn(
+                  "h-5 w-5",
+                  showComments && "fill-current"
+                )} />
+                <span className="text-sm font-medium">
+                  {formatNumber(localPost.comments_count)}
+                </span>
+              </Button>
+            </div>
+
+            <div className="flex items-center space-x-2">
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={handleShare}
+                className="text-gray-600 dark:text-gray-300 hover:text-blue-500 dark:hover:text-blue-400"
+              >
+                <Share2 className="h-5 w-5" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={handleBookmark}
+                className={cn(
+                  "text-gray-600 dark:text-gray-300",
+                  "hover:text-blue-500 dark:hover:text-blue-400",
+                  isBookmarked && "text-blue-500 dark:text-blue-400"
+                )}
+              >
+                <Bookmark className={cn(
+                  "h-5 w-5",
+                  isBookmarked && "fill-current"
+                )} />
+              </Button>
+            </div>
           </div>
-
-          <div className="flex items-center space-x-2">
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={handleShare}
-              className="text-gray-600 dark:text-gray-300 hover:text-blue-500 dark:hover:text-blue-400"
-            >
-              <Share2 className="h-5 w-5" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={handleBookmark}
-              className={cn(
-                "text-gray-600 dark:text-gray-300",
-                "hover:text-blue-500 dark:hover:text-blue-400",
-                isBookmarked && "text-blue-500 dark:text-blue-400"
-              )}
-            >
-              <Bookmark className={cn(
-                "h-5 w-5",
-                isBookmarked && "fill-current"
-              )} />
-            </Button>
-          </div>
-        </div>
+        )}
       </div>
 
       {/* Comments Section */}

@@ -285,11 +285,19 @@ class PostViewSet(BaseViewSet):
                 if section_posts:
                     serializer = self.get_serializer(section_posts, many=True)
                     result_data['data']['sections'][current_section] = serializer.data
-                    result_data['data']['sections_included'].append(current_section)
+                    result_data['data']['metadata']['sections_included'].append(current_section)
                     result_data['data']['metadata']['has_more'] = result_data['data']['metadata']['has_more'] or has_more
                     
                     # Add seen posts to avoid duplicates
                     seen_post_ids.update([post.id for post in section_posts])
+            
+            # For backward compatibility with frontend expecting a paginated format
+            if page == 1 and 'trending' in result_data['data']['sections']:
+                trending_posts = result_data['data']['sections']['trending']
+                result_data['data']['results'] = trending_posts
+                result_data['data']['count'] = len(trending_posts)
+                result_data['data']['next'] = result_data['data']['metadata']['has_more']
+                result_data['data']['previous'] = None
             
             # Add total counts by section to metadata
             if request.user.is_authenticated:
@@ -315,7 +323,8 @@ class PostViewSet(BaseViewSet):
             try:
                 fallback_posts = self.get_queryset().order_by('-created_at')[:10]
                 serializer = self.get_serializer(fallback_posts, many=True)
-                return Response({
+                # Return in a format compatible with the old and new frontend
+                response_data = {
                     'success': True,
                     'data': {
                         'sections': {
@@ -325,9 +334,15 @@ class PostViewSet(BaseViewSet):
                             'has_more': fallback_posts.count() > 0,
                             'current_page': 1,
                             'sections_included': ['fallback']
-                        }
+                        },
+                        # For backward compatibility
+                        'results': serializer.data,
+                        'count': fallback_posts.count(),
+                        'next': fallback_posts.count() > 0,
+                        'previous': None
                     }
-                })
+                }
+                return Response(response_data)
             except Exception as inner_e:
                 return Response({
                     'success': False,

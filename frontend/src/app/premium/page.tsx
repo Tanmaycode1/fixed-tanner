@@ -123,7 +123,7 @@ export default function PremiumPage() {
                 {...fadeInUp}
                 className="inline-block mb-4 px-4 py-1.5 bg-primary-100 dark:bg-primary-900/50 text-primary-700 dark:text-primary-300 rounded-full text-sm font-medium"
               >
-                Premium Features
+                Exclusive Benefits
               </motion.div>
               
               <motion.h1 
@@ -131,7 +131,7 @@ export default function PremiumPage() {
                 transition={{ duration: 0.6, delay: 0.2 }}
                 className="text-4xl md:text-5xl lg:text-6xl font-bold text-gray-900 dark:text-white mb-6 leading-tight"
               >
-                Unlock Premium Features
+                Elevate Your Experience
               </motion.h1>
               
               <motion.p 
@@ -139,9 +139,27 @@ export default function PremiumPage() {
                 transition={{ duration: 0.6, delay: 0.4 }}
                 className="text-xl text-gray-600 dark:text-gray-300 mb-8"
               >
-                Get access to exclusive content, advanced features, and connect with industry experts.
-                Choose the plan that's right for you.
+                Unlock premium features like unlimited messaging, audio uploads, and access to our expert network. Choose from three flexible plans to suit your needs.
               </motion.p>
+              
+              <motion.div
+                {...fadeInUp}
+                transition={{ duration: 0.6, delay: 0.6 }}
+                className="flex flex-wrap gap-4"
+              >
+                <Link 
+                  href="#pricing" 
+                  className="px-6 py-3 bg-primary-500 hover:bg-primary-600 text-white font-medium rounded-lg transition-colors duration-300"
+                >
+                  View Plans
+                </Link>
+                <Link 
+                  href="/contact" 
+                  className="px-6 py-3 bg-white dark:bg-gray-800 text-gray-900 dark:text-white hover:bg-gray-100 dark:hover:bg-gray-700 font-medium rounded-lg transition-colors duration-300"
+                >
+                  Contact Sales
+                </Link>
+              </motion.div>
             </div>
 
             <motion.div
@@ -152,8 +170,8 @@ export default function PremiumPage() {
             >
               <div className="relative aspect-[4/3] rounded-lg overflow-hidden shadow-xl dark:shadow-primary-500/10">
                 <Image
-                  src="https://images.unsplash.com/photo-1559523161-0fc32d786b0c?ixlib=rb-4.0.3&ixid=MnwxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8&auto=format&fit=crop&w=2070&q=80"
-                  alt="Premium features illustration"
+                  src="https://images.unsplash.com/photo-1552664730-d307ca884978?ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D&auto=format&fit=crop&w=2070&q=80"
+                  alt="Premium subscription benefits"
                   fill
                   className="object-cover"
                   priority

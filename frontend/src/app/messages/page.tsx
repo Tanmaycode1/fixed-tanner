@@ -10,6 +10,7 @@ import ChatArea from '../../components/chat/ChatArea';
 import { ChatFiltersDialog } from '@/components/chat/ChatFiltersDialog';
 import { Message, ChatRoom, Filters} from '@/types/chat';
 import { SearchUser } from '@/types/user';
+import axios from 'axios';
 
 interface WebSocketMessage {
   type: string;
@@ -126,26 +127,28 @@ export default function MessagesPage() {
     }
   }, []);
 
-  // Handle user search
-  const handleSearch = useCallback(async (query: string) => {
+  // Search for users to start a conversation with
+  const searchUsers = useCallback(async (query: string) => {
     if (!query.trim()) {
       setSearchResults([]);
       setSearching(false);
       return;
     }
-    setSearching(true);
+
     try {
-      const response = await userApi.searchUsers(query);
-      if (response.success && response.data) {
-        const formattedResults = response.data.map(user => ({
-          ...user,
-          avatar_url: user.avatar_url || null
-        })) as LocalSearchUser[];
-        setSearchResults(formattedResults);
+      setSearching(true);
+      // Add simple=true and refresh=true query params to API call
+      const url = `/api/users/search/?q=${encodeURIComponent(query)}&simple=true&refresh=true`;
+      const response = await axios.get(url);
+      
+      if (response.data.success) {
+        setSearchResults(response.data.data || []);
+      } else {
+        setSearchResults([]);
       }
     } catch (error) {
-      console.error('Search error:', error);
-      toast.error('Failed to search users');
+      console.error('Error searching users:', error);
+      setSearchResults([]);
     } finally {
       setSearching(false);
     }
@@ -174,7 +177,10 @@ export default function MessagesPage() {
     if (!selectedRoom) return '';
     const token = localStorage.getItem('access_token');
     if (!token) return '';
-    return `${wsBaseUrl}/ws/chat/${selectedRoom.id}/?token=${token}`;
+    
+    // Remove trailing slash from wsBaseUrl to prevent double slashes
+    const baseUrl = wsBaseUrl.endsWith('/') ? wsBaseUrl.slice(0, -1) : wsBaseUrl;
+    return `${baseUrl}/chat/${selectedRoom.id}/?token=${token}`;
   }, [wsBaseUrl, selectedRoom]);
 
   const { sendMessage, isConnected, socket: wsSocket } = useWebSocket({
@@ -375,7 +381,7 @@ export default function MessagesPage() {
             }
           }}
           selectedRoom={selectedRoom}
-          onSearch={handleSearch}
+          onSearch={searchUsers}
           searchResults={searchResults}
           searching={searching}
           onCreateRoom={createChatRoom}

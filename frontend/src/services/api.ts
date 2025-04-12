@@ -483,20 +483,17 @@ interface FollowResponse {
 }
 
 export const userApi = {
-  getProfile: async () => {
-    try {
+  getProfile: async (forceRefresh = false) => {
+    // Create a unique cache key for the user profile
+    const cacheKey = 'user_profile';
+    
+    return cachedRequest(async () => {
       const response = await api.get('/api/users/me/');
       if (response.data.success && response.data.data.avatar_url) {
         response.data.data.avatar_url = getFullImageUrl(response.data.data.avatar_url);
       }
       return response.data;
-    } catch (error: unknown) {
-      const axiosError = error as AxiosError<{
-        message?: string;
-        errors?: Record<string, string[]>;
-      }>;
-      return handleApiError(axiosError as ApiErrorType);
-    }
+    }, cacheKey, forceRefresh, 60000); // Cache for 1 minute
   },
 
   updateProfile: async (data: UserProfileUpdate) => {
@@ -676,13 +673,14 @@ export const userApi = {
 };
 
 export const searchApi = {
-  search: async (query: string, type: string = 'all', bypassCache: boolean = false): Promise<ApiResponse<SearchData>> => {
+  search: async (query: string, type: string = 'all', bypassCache: boolean = true): Promise<ApiResponse<SearchData>> => {
     try {
       const response = await api.get('/api/search/', {
         params: { 
           q: query, 
           type,
-          bypass_cache: bypassCache
+          refresh: true,  // Always bypass cache
+          simple: true    // Always use simple search
         }
       });
       return { success: true, data: response.data.data };

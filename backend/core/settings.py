@@ -199,20 +199,41 @@ MEDIA_SUBDIRS = {
 for dir_path in MEDIA_SUBDIRS.values():
     os.makedirs(dir_path, exist_ok=True)
 
-"""
-# AWS S3 Configuration (Commented out for future use)
+# AWS S3 Configuration
 AWS_ACCESS_KEY_ID = os.getenv('AWS_ACCESS_KEY_ID')
 AWS_SECRET_ACCESS_KEY = os.getenv('AWS_SECRET_ACCESS_KEY')
 AWS_STORAGE_BUCKET_NAME = os.getenv('AWS_STORAGE_BUCKET_NAME')
 AWS_S3_REGION_NAME = os.getenv('AWS_S3_REGION_NAME')
 AWS_S3_FILE_OVERWRITE = False
-AWS_DEFAULT_ACL = 'public-read'
+AWS_DEFAULT_ACL = 'public-read'  # Make all objects publicly readable by default
 AWS_S3_VERIFY = True
-DEFAULT_FILE_STORAGE = 'storages.backends.s3boto3.S3Boto3Storage'
-"""
+AWS_QUERYSTRING_AUTH = False  # Don't add authentication parameters to URLs
 
-# Use local storage for static files
-STATICFILES_STORAGE = 'django.contrib.staticfiles.storage.StaticFilesStorage'
+# Use S3 for storage only if all required credentials are provided
+if AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY and AWS_STORAGE_BUCKET_NAME and AWS_S3_REGION_NAME:
+    # Define separate folders in the bucket for static and media files
+    AWS_STATIC_LOCATION = 'static'
+    AWS_MEDIA_LOCATION = ''  # No location prefix needed
+    
+    # Add error handling for S3
+    AWS_S3_CUSTOM_DOMAIN = f'{AWS_STORAGE_BUCKET_NAME}.s3.{AWS_S3_REGION_NAME}.amazonaws.com'
+    AWS_S3_OBJECT_PARAMETERS = {
+        'CacheControl': 'max-age=86400',
+    }
+    
+    # Set storage classes to use these locations
+    STATICFILES_STORAGE = 'core.storage_backends.StaticStorage'
+    DEFAULT_FILE_STORAGE = 'core.storage_backends.MediaStorage'
+    
+    # Static and media URLs will point to S3
+    STATIC_URL = f'https://{AWS_S3_CUSTOM_DOMAIN}/{AWS_STATIC_LOCATION}/'
+    MEDIA_URL = f'https://{AWS_S3_CUSTOM_DOMAIN}/'  # Root URL without media prefix
+else:
+    # Use local storage for static files
+    STATICFILES_STORAGE = 'django.contrib.staticfiles.storage.StaticFilesStorage'
+    DEFAULT_FILE_STORAGE = 'django.core.files.storage.FileSystemStorage'
+    STATIC_URL = '/static/'
+    MEDIA_URL = '/media/'
 
 # CORS settings
 CORS_ALLOW_ALL_ORIGINS = DEBUG

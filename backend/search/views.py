@@ -7,7 +7,7 @@ from django.contrib.postgres.search import (
 )
 from django.db.models import Q, F, Value, Case, When, Exists, OuterRef, Count, Sum, FloatField, Func, TextField
 from django.db.models.functions import Greatest, Lower, Cast
-from posts.models import Post, PostInteraction
+from posts.models import Post, PostInteraction, PostView, Tag, Comment
 from users.models import User
 from posts.serializers import PostSerializer
 from users.serializers import UserSerializer
@@ -28,6 +28,8 @@ from nltk.corpus import stopwords
 from nltk.tokenize import word_tokenize
 from functools import lru_cache
 from django.contrib.postgres.search import SearchQuery, SearchRank, SearchVector
+import time
+from django.contrib.auth import get_user_model
 
 # Initialize NLTK components (you'll need to download these in your entrypoint.sh)
 try:
@@ -83,6 +85,146 @@ def preprocess_query(query_text):
         'processed': processed_tokens,
         'original_tokens': tokens
     }
+
+# Simple function to calculate string similarity score (0-1)
+def get_string_similarity(str1, str2):
+    """Calculate string similarity between two strings ignoring case."""
+    if not str1 or not str2:
+        return 0
+    
+    str1 = str1.lower()
+    str2 = str2.lower()
+    
+    # Direct match
+    if str1 == str2:
+        return 1.0
+    
+    # Contains match
+    if str1 in str2 or str2 in str1:
+        return 0.8
+    
+    # Levenshtein distance (normalized)
+    lev_score = 1 - (jellyfish.levenshtein_distance(str1, str2) / max(len(str1), len(str2)))
+    
+    # Metaphone match (phonetic similarity)
+    if jellyfish.metaphone(str1) == jellyfish.metaphone(str2):
+        return max(0.7, lev_score)
+    
+    return lev_score
+
+# Perform a simple search when advanced search fails
+def simple_search(query, model, fields, limit=20):
+    """
+    Simple search function with basic string similarity
+    - Ignores case
+    - Handles simple spelling mistakes
+    - No caching, always fresh results
+    """
+    logger.info(f"Using simple search for '{query}' on {model.__name__}")
+    query = query.lower().strip()
+    results = []
+    
+    if model == User:
+        # For users, search in username, first_name, last_name, email, bio
+        queryset = model.objects.all()
+        fields_to_check = fields
+        
+        # First grab exact matches
+        exact_matches = queryset.filter(
+            Q(username__iexact=query) |
+            Q(first_name__iexact=query) |
+            Q(last_name__iexact=query) |
+            Q(email__iexact=query)
+        )
+        
+        # Then partial matches
+        partial_matches = queryset.filter(
+            Q(username__icontains=query) |
+            Q(first_name__icontains=query) |
+            Q(last_name__icontains=query) |
+            Q(email__icontains=query) |
+            Q(bio__icontains=query)
+        ).exclude(id__in=[user.id for user in exact_matches])
+        
+        # Combine results
+        all_matches = list(exact_matches) + list(partial_matches)
+        
+        # If we don't have enough results, do a more relaxed search with string similarity
+        if len(all_matches) < limit:
+            # Get all users (limit this in production to a reasonable number)
+            remaining_needed = limit - len(all_matches)
+            potential_matches = queryset.exclude(
+                id__in=[user.id for user in all_matches]
+            )[:500]  # Limit to 500 for performance
+            
+            # Score based on string similarity
+            similar_matches = []
+            for user in potential_matches:
+                max_score = 0
+                for field in fields_to_check:
+                    field_value = getattr(user, field, "")
+                    if field_value:
+                        similarity = get_string_similarity(query, str(field_value))
+                        max_score = max(max_score, similarity)
+                
+                if max_score > 0.6:  # Threshold for similarity
+                    similar_matches.append((user, max_score))
+            
+            # Sort by similarity score and take the top N
+            similar_matches.sort(key=lambda x: x[1], reverse=True)
+            all_matches.extend([match[0] for match in similar_matches[:remaining_needed]])
+        
+        return all_matches[:limit]
+        
+    elif model == Post:
+        # For posts, search in title, description, content
+        queryset = model.objects.all()
+        fields_to_check = fields
+        
+        # First grab exact matches
+        exact_matches = queryset.filter(
+            Q(title__iexact=query) |
+            Q(description__iexact=query)
+        )
+        
+        # Then partial matches
+        partial_matches = queryset.filter(
+            Q(title__icontains=query) |
+            Q(description__icontains=query) |
+            Q(content__icontains=query)
+        ).exclude(id__in=[post.id for post in exact_matches])
+        
+        # Combine results
+        all_matches = list(exact_matches) + list(partial_matches)
+        
+        # If we don't have enough results, do a more relaxed search with string similarity
+        if len(all_matches) < limit:
+            # Get remaining posts
+            remaining_needed = limit - len(all_matches)
+            potential_matches = queryset.exclude(
+                id__in=[post.id for post in all_matches]
+            ).order_by('-created_at')[:500]  # Limit to 500 for performance
+            
+            # Score based on string similarity
+            similar_matches = []
+            for post in potential_matches:
+                max_score = 0
+                for field in fields_to_check:
+                    field_value = getattr(post, field, "")
+                    if field_value:
+                        similarity = get_string_similarity(query, str(field_value))
+                        max_score = max(max_score, similarity)
+                
+                if max_score > 0.6:  # Threshold for similarity
+                    similar_matches.append((post, max_score))
+            
+            # Sort by similarity score and take the top N
+            similar_matches.sort(key=lambda x: x[1], reverse=True)
+            all_matches.extend([match[0] for match in similar_matches[:remaining_needed]])
+        
+        return all_matches[:limit]
+    
+    return []
 
 class SearchViewSet(ViewSet):
     permission_classes = [IsAuthenticated]
@@ -149,16 +291,27 @@ class SearchViewSet(ViewSet):
         """
         try:
             if not query:
-                return []
+                logger.info("Empty query in _search_users, returning default users")
+                # Return active users ordered by followers instead of empty results
+                default_users = User.objects.annotate(
+                    followers_count=Count('followers')
+                ).order_by('-followers_count')[:10]
+                return UserSerializer(
+                    default_users,
+                    many=True,
+                    context={'request': self.request}
+                ).data
                 
-            # Try cache first
             normalized_query = self._normalize_query(query)
             cache_key = self._get_cache_key(query, 'users', self.request.user.id)
             
-            cached_results = cache.get(cache_key)
-            if cached_results:
-                logger.info(f"Using cached user search results for '{query}'")
-                return cached_results
+            # Try to get from cache first unless bypass_cache is set
+            bypass_cache = self.request.GET.get('refresh', '').lower() == 'true'
+            if not bypass_cache:
+                cached_results = cache.get(cache_key)
+                if cached_results:
+                    logger.info(f"Using cached user search results for '{query}'")
+                    return cached_results
             
             # Get NLP processed query 
             processed_query = preprocess_query(query)
@@ -276,15 +429,13 @@ class SearchViewSet(ViewSet):
             ).select_related(
                 'profile'
             ).filter(
-                # Filter with a combined approach for both precision and recall
-                Q(relevance__gt=0.2) | 
-                Q(search_rank__gt=0.1) |
-                Q(username__in=[term for term in query_terms]) |
-                Q(first_name__in=[term for term in query_terms]) |
-                Q(last_name__in=[term for term in query_terms]) |
+                # Make filtering MUCH less restrictive to ensure results are returned
+                Q(relevance__gt=0.01) |  # Lower the relevance threshold significantly
+                Q(search_rank__gt=0.01) |
                 Q(username__icontains=normalized_query) |
                 Q(first_name__icontains=normalized_query) |
-                Q(last_name__icontains=normalized_query)
+                Q(last_name__icontains=normalized_query) |
+                Q(bio__icontains=normalized_query)
             ).order_by(
                 '-is_followed',   # Sort followed users first
                 '-relevance',     # Then by relevance score
@@ -292,7 +443,7 @@ class SearchViewSet(ViewSet):
                 '-activity_score' # Then by activity
             )
             
-            # For performance, limit to a reasonable number
+            # For performance, limit to a reasonable number but ensure we get results
             users = users[:40]
 
             # Create result with user data and debug info
@@ -374,16 +525,26 @@ class SearchViewSet(ViewSet):
         """Google-like post search with advanced ranking and relevance scoring"""
         try:
             if not query:
-                return []
+                logger.info("Empty query in _search_posts, returning default posts")
+                # Return trending posts instead of empty results
+                default_posts = Post.objects.order_by('-trending_score__score', '-created_at')[:10]
+                default_posts = self._prepare_post_queryset(default_posts)
+                return PostSerializer(
+                    default_posts,
+                    many=True,
+                    context={'request': self.request}
+                ).data
                 
             normalized_query = self._normalize_query(query)
             cache_key = self._get_cache_key(query, 'posts', self.request.user.id)
             
-            # Try to get from cache first
-            cached_results = cache.get(cache_key)
-            if cached_results:
-                logger.info(f"Using cached post search results for '{query}'")
-                return cached_results
+            # Try to get from cache first unless bypass_cache is set
+            bypass_cache = self.request.GET.get('refresh', '').lower() == 'true'
+            if not bypass_cache:
+                cached_results = cache.get(cache_key)
+                if cached_results:
+                    logger.info(f"Using cached post search results for '{query}'")
+                    return cached_results
             
             # Get NLP processed query
             processed_query = preprocess_query(query)
@@ -518,7 +679,13 @@ class SearchViewSet(ViewSet):
                     ) * F('recency_score')) + F('popularity_score'),  # Apply recency and popularity
                     FloatField()
                 )
-            ).filter(
+            )
+            
+            # Store original, non-filtered query
+            original_posts = posts
+            
+            # First try with stricter relevance filter
+            filtered_posts = posts.filter(
                 # Comprehensive filtering for high recall
                 Q(relevance__gt=0.2) |
                 Q(search_rank__gt=0.1) |
@@ -531,11 +698,41 @@ class SearchViewSet(ViewSet):
                 '-relevance'  # Single order by most relevant first
             ).distinct()  # Ensure no duplicates from joins
             
-            # Apply common post preparations
-            posts = self._prepare_post_queryset(posts)
+            # If we have very few results, try a more relaxed filter
+            if filtered_posts.count() < 5:
+                logger.info(f"Few results ({filtered_posts.count()}) for '{query}', trying relaxed filter")
+                filtered_posts = posts.filter(
+                    Q(relevance__gt=0.1) |  # Lower relevance threshold
+                    Q(search_rank__gt=0.05) |  # Lower search rank threshold
+                    Q(title__icontains=query) |
+                    Q(description__icontains=query) |
+                    Q(content__icontains=query) |
+                    Q(author__username__icontains=query) |  # Add author search
+                    Q(tags__name__icontains=query)
+                ).order_by('-relevance').distinct()
             
-            # For performance, limit to a reasonable number
+            # If still no results, add some trending posts as fallback
+            if filtered_posts.count() == 0:
+                logger.info(f"No results for '{query}', adding trending posts as fallback")
+                trending_posts = Post.objects.order_by('-trending_score__score', '-created_at')[:5]
+                filtered_posts = trending_posts
+            
+            # Apply common post preparations
+            posts = self._prepare_post_queryset(filtered_posts)
+            
+            # For performance, limit to a reasonable number but ensure we get results
             posts = posts[:40]
+            
+            # Fall back to a simpler query if no results
+            if not posts:
+                logger.info(f"No posts found with complex query for '{query}', falling back to simpler search")
+                simple_posts = Post.objects.filter(
+                    Q(title__icontains=normalized_query) |
+                    Q(description__icontains=normalized_query) |
+                    Q(content__icontains=normalized_query)
+                ).order_by('-created_at')[:40]
+                
+                posts = self._prepare_post_queryset(simple_posts)
             
             # Serialize results
             serialized_data = PostSerializer(
@@ -564,15 +761,28 @@ class SearchViewSet(ViewSet):
                             'search_type': search_type
                         }
 
-            # Cache results for 2 minutes
-            cache.set(cache_key, serialized_data, 120)
+            # Cache results for 5 minutes
+            cache.set(cache_key, serialized_data, 300)
 
             logger.info(f"Advanced search found {len(serialized_data)} posts matching '{query}'")
             return serialized_data
 
         except Exception as e:
             logger.error(f"Advanced post search error: {str(e)}", exc_info=True)
-            return []
+            # Return trending posts if an error occurs
+            try:
+                fallback_posts = Post.objects.order_by('-trending_score__score', '-created_at')[:10]
+                fallback_posts = self._prepare_post_queryset(fallback_posts)
+                fallback_results = PostSerializer(
+                    fallback_posts,
+                    many=True,
+                    context={'request': self.request}
+                ).data
+                logger.info(f"Returning {len(fallback_results)} fallback posts after search error")
+                return fallback_results
+            except Exception as fallback_error:
+                logger.error(f"Fallback post query error: {str(fallback_error)}")
+                return []
 
     def list(self, request):
         """Main search endpoint with performance optimizations"""
@@ -580,25 +790,30 @@ class SearchViewSet(ViewSet):
             self.request = request
             query = request.GET.get('q', '').strip()
             search_type = request.GET.get('type', 'all').lower()
+            page = int(request.GET.get('page', '1'))
+            page_size = int(request.GET.get('page_size', '20'))
+            bypass_cache = request.GET.get('refresh', '').lower() == 'true'
+            # Add a flag to use the simple search directly
+            use_simple_search = request.GET.get('simple', '').lower() == 'true'
             
             # Get client IP for logging
             ip_address = request.META.get('REMOTE_ADDR')
 
-            logger.info(f"Search request - query: {query}, type: {search_type}")
-
-            if not query:
-                logger.info("Empty query, returning empty results")
-                return Response({
-                    'success': True,
-                    'data': {
-                        'posts': [],
-                        'users': []
-                    }
-                })
+            logger.info(f"Search request - query: {query}, type: {search_type}, page: {page}, bypass_cache: {bypass_cache}, use_simple_search: {use_simple_search}")
 
             results = {
                 'posts': [],
                 'users': []
+            }
+            
+            # Set up pagination metadata
+            pagination = {
+                'page': page,
+                'page_size': page_size,
+                'has_more_posts': False,
+                'has_more_users': False,
+                'total_posts': 0,
+                'total_users': 0
             }
 
             # Track the search query asynchronously to avoid performance impact
@@ -611,18 +826,98 @@ class SearchViewSet(ViewSet):
                     )
                 except Exception as e:
                     logger.error(f"Error logging search query: {str(e)}")
+            
+            # If empty query, return trending content instead of empty results
+            if not query:
+                logger.info("Empty query, returning trending content")
+                
+                if search_type in ['all', 'posts']:
+                    trending_posts = Post.objects.select_related('author').order_by('-trending_score__score', '-created_at')
+                    trending_posts = self._prepare_post_queryset(trending_posts)
+                    # Paginate
+                    start = (page - 1) * page_size
+                    end = start + page_size
+                    paginated_posts = trending_posts[start:end]
+                    total_posts = trending_posts.count()
+                    
+                    results['posts'] = PostSerializer(
+                        paginated_posts, 
+                        many=True, 
+                        context={'request': request}
+                    ).data
+                    
+                    pagination['has_more_posts'] = total_posts > end
+                    pagination['total_posts'] = total_posts
+                
+                if search_type in ['all', 'users']:
+                    # Return users with most followers
+                    trending_users = User.objects.annotate(
+                        followers_count=Count('followers')
+                    ).order_by('-followers_count')
+                    # Paginate
+                    start = (page - 1) * page_size
+                    end = start + page_size
+                    paginated_users = trending_users[start:end]
+                    total_users = trending_users.count()
+                    
+                    results['users'] = UserSerializer(
+                        paginated_users,
+                        many=True,
+                        context={'request': request}
+                    ).data
+                    
+                    pagination['has_more_users'] = total_users > end
+                    pagination['total_users'] = total_users
+                
+                return Response({
+                    'success': True,
+                    'data': results,
+                    'pagination': pagination
+                })
 
             # Get posts if requested
             if search_type in ['all', 'posts']:
                 try:
-                    results['posts'] = self._search_posts(query)
-                    logger.info(f"Found {len(results['posts'])} posts")
+                    # Determine whether to use simple search
+                    if use_simple_search:
+                        # Use simple search directly
+                        simple_post_results = simple_search(query, Post, ['title', 'description', 'content'], 40)
+                        all_posts = PostSerializer(
+                            self._prepare_post_queryset(simple_post_results),
+                            many=True,
+                            context={'request': request}
+                        ).data
+                    else:
+                        # Try advanced search first
+                        all_posts = self._search_posts(query)
+                        
+                        # If no results, try simple search as fallback
+                        if not all_posts:
+                            logger.info(f"Advanced search returned no results for '{query}', trying simple search")
+                            simple_post_results = simple_search(query, Post, ['title', 'description', 'content'], 40)
+                            all_posts = PostSerializer(
+                                self._prepare_post_queryset(simple_post_results),
+                                many=True,
+                                context={'request': request}
+                            ).data
+                    
+                    total_posts = len(all_posts)
+                    
+                    # Paginate
+                    start = (page - 1) * page_size
+                    end = start + page_size
+                    results['posts'] = all_posts[start:end] if start < total_posts else []
+                    
+                    pagination['has_more_posts'] = total_posts > end
+                    pagination['total_posts'] = total_posts
+                    
+                    logger.info(f"Found {total_posts} posts, returning {len(results['posts'])} for page {page}")
                     
                     # Log search asynchronously
                     self._log_search(
                         request.user, 
                         query, 
-                        len(results['posts']), 
+                        total_posts, 
                         'POSTS',
                         ip_address
                     )
@@ -632,15 +927,47 @@ class SearchViewSet(ViewSet):
             # Get users if requested
             if search_type in ['all', 'users']:
                 try:
-                    results['users'] = self._search_users(query)
-                    logger.info(f"Found {len(results['users'])} users")
+                    # Determine whether to use simple search
+                    if use_simple_search:
+                        # Use simple search directly
+                        simple_user_results = simple_search(query, User, ['username', 'first_name', 'last_name', 'email', 'bio'], 40)
+                        all_users = UserSerializer(
+                            simple_user_results,
+                            many=True,
+                            context={'request': request}
+                        ).data
+                    else:
+                        # Try advanced search first
+                        all_users = self._search_users(query)
+                        
+                        # If no results, try simple search as fallback
+                        if not all_users:
+                            logger.info(f"Advanced search returned no results for '{query}', trying simple search")
+                            simple_user_results = simple_search(query, User, ['username', 'first_name', 'last_name', 'email', 'bio'], 40)
+                            all_users = UserSerializer(
+                                simple_user_results,
+                                many=True,
+                                context={'request': request}
+                            ).data
+                    
+                    total_users = len(all_users)
+                    
+                    # Paginate
+                    start = (page - 1) * page_size
+                    end = start + page_size
+                    results['users'] = all_users[start:end] if start < total_users else []
+                    
+                    pagination['has_more_users'] = total_users > end
+                    pagination['total_users'] = total_users
+                    
+                    logger.info(f"Found {total_users} users, returning {len(results['users'])} for page {page}")
                     
                     # Log search asynchronously if not already logged for posts
                     if search_type != 'all':
                         self._log_search(
                             request.user, 
                             query, 
-                            len(results['users']), 
+                            total_users, 
                             'USERS',
                             ip_address
                         )
@@ -649,7 +976,8 @@ class SearchViewSet(ViewSet):
 
             return Response({
                 'success': True,
-                'data': results
+                'data': results,
+                'pagination': pagination
             })
 
         except Exception as e:

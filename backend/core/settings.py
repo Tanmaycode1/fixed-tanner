@@ -205,7 +205,7 @@ AWS_SECRET_ACCESS_KEY = os.getenv('AWS_SECRET_ACCESS_KEY')
 AWS_STORAGE_BUCKET_NAME = os.getenv('AWS_STORAGE_BUCKET_NAME')
 AWS_S3_REGION_NAME = os.getenv('AWS_S3_REGION_NAME')
 AWS_S3_FILE_OVERWRITE = False
-AWS_DEFAULT_ACL = 'public-read'  # Make all objects publicly readable by default
+AWS_DEFAULT_ACL = None  # Don't set ACL, use bucket owner enforced settings
 AWS_S3_VERIFY = True
 AWS_QUERYSTRING_AUTH = False  # Don't add authentication parameters to URLs
 

@@ -53,13 +53,14 @@ class CustomUserManager(BaseUserManager):
         user.save(using=self._db)
         return user
 
-    def create_superuser(self, email, password=None, username=None, **extra_fields):
+    def create_superuser(self, email, password=None, **extra_fields):
         extra_fields.setdefault('is_staff', True)
         extra_fields.setdefault('is_superuser', True)
         
-        if username is None:
+        # If username is passed explicitly, use it, otherwise derive from email
+        if 'username' not in extra_fields:
             username = email.split('@')[0]
-        extra_fields.setdefault('username', username)
+            extra_fields['username'] = username
         
         return self.create_user(email, password, **extra_fields)
 

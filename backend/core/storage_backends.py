@@ -8,7 +8,7 @@ class StaticStorage(S3Boto3Storage):
     """
     location = settings.AWS_STATIC_LOCATION
     file_overwrite = True  # For static files, we want to overwrite
-    default_acl = 'public-read'  # Static files need to be public
+    default_acl = None  # Don't set ACL, use bucket defaults
     querystring_auth = False  # Don't add auth tokens to URLs
     
     def _get_security_token(self):
@@ -22,7 +22,7 @@ class MediaStorage(S3Boto3Storage):
     """
     location = ''  # No location prefix needed, paths are already structured in the upload handlers
     file_overwrite = False  # Don't overwrite media files with the same name
-    default_acl = 'public-read'  # Media files need to be public for frontend access
+    default_acl = None  # Don't set ACL, use bucket defaults
     querystring_auth = False  # Don't add auth tokens to URLs
     
     def _get_security_token(self):

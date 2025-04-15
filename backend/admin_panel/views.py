@@ -5,7 +5,7 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from django.contrib.auth import get_user_model
 from system_logs.models import SystemLog, UserRole, ModeratorAction
-from posts.models import Post
+from posts.models import Post, PostInteraction, Comment, PostView, Tag
 from moderation.models import Report
 from .serializers import (
     SystemLogSerializer, UserRoleSerializer, 
@@ -44,6 +44,8 @@ from functools import wraps
 import asyncio
 import time
 import concurrent.futures
+from core.db.decorators import use_primary_database, UsePrimaryDatabaseMixin
+from core.db.routers import set_write_operation
 
 # Set up logger
 logger = logging.getLogger(__name__)
@@ -54,6 +56,11 @@ def with_transaction(f):
     """Decorator to wrap a view method in a transaction with proper error handling"""
     @wraps(f)
     def wrapped(self, request, *args, **kwargs):
+        # Set flag to use primary database
+        setattr(request, '_use_primary_db', True)
+        # Also set global thread write operation flag
+        set_write_operation(True)
+        
         try:
             with transaction.atomic():
                 return f(self, request, *args, **kwargs)
@@ -75,6 +82,10 @@ def async_operation(f):
     """Decorator to run a method asynchronously using ThreadPoolExecutor"""
     @wraps(f)
     def wrapped(self, request, *args, **kwargs):
+        # Set flags to use primary database
+        setattr(request, '_use_primary_db', True)
+        set_write_operation(True)
+        
         # For delete operations and other write operations, use this
         executor = concurrent.futures.ThreadPoolExecutor(max_workers=4)
         try:
@@ -113,6 +124,7 @@ def async_operation(f):
 )
 @api_view(['GET', 'OPTIONS'])
 @permission_classes([APIKeyPermission])
+@use_primary_database
 def validate_api_key(request):
     """
     Endpoint to validate API key
@@ -129,7 +141,7 @@ class StandardResultsSetPagination(PageNumberPagination):
     page_size_query_param = 'page_size'
     max_page_size = 100
 
-class AdminPanelViewSet(GenericViewSet):
+class AdminPanelViewSet(UsePrimaryDatabaseMixin, GenericViewSet):
     permission_classes = [APIKeyPermission]
     pagination_class = StandardResultsSetPagination
 
@@ -1128,6 +1140,13 @@ class AdminPanelViewSet(GenericViewSet):
         import hashlib
         import json
         
+        # Set timeout for the database operations
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute("SET LOCAL statement_timeout = '5000';")  # 5 second timeout
+        except Exception as e:
+            logger.warning(f"Could not set timeout for post_stats: {e}")
+        
         start_date = request.query_params.get('start_date')
         end_date = request.query_params.get('end_date')
         
@@ -1322,6 +1341,13 @@ class AdminPanelViewSet(GenericViewSet):
     def search(self, request):
         """Advanced search endpoint for admin panel with API key authentication"""
         try:
+            # Set timeout for admin panel search queries to prevent WebSocket timeouts
+            try:
+                with connection.cursor() as cursor:
+                    cursor.execute("SET LOCAL statement_timeout = '3000';")  # 3 second timeout
+            except Exception as e:
+                logger.warning(f"Could not set timeout for admin search: {e}")
+                
             query = request.GET.get('q', '').strip()
             search_type = request.GET.get('type', 'all').lower()
             use_simple_search = request.GET.get('simple', '').lower() == 'true'
@@ -1344,28 +1370,22 @@ class AdminPanelViewSet(GenericViewSet):
             }
 
             # Import the SearchViewSet and simple_search function
-            from search.views import SearchViewSet, simple_search
-            search_viewset = SearchViewSet()
-            search_viewset.request = request
+            try:
+                from search.views import SearchViewSet, simple_search
+                search_viewset = SearchViewSet()
+                
+                # Properly set the request on the viewset to ensure consistent behavior
+                search_viewset.request = request
+                search_viewset.request.path += "?admin_panel=true"  # Mark as admin panel request
 
-            # Get users if requested
-            if search_type in ['all', 'users']:
-                try:
-                    if use_simple_search:
-                        # Use simple search directly
-                        simple_user_results = simple_search(query, User, ['username', 'first_name', 'last_name', 'email', 'bio'], 40)
-                        results['users'] = AdminUserSerializer(
-                            simple_user_results,
-                            many=True,
-                            context={'request': request}
-                        ).data
-                    else:
-                        # First try the advanced search from SearchViewSet
+                # Get users if requested
+                if search_type in ['all', 'users']:
+                    try:
                         users_results = search_viewset._search_users(query)
-                        # Convert to admin serializer format
-                        user_ids = [user['id'] for user in users_results]
                         
-                        if user_ids:
+                        if users_results:
+                            # Convert results to admin serializer format
+                            user_ids = [user['id'] for user in users_results]
                             users = User.objects.filter(id__in=user_ids)
                             results['users'] = AdminUserSerializer(
                                 users,
@@ -1373,38 +1393,18 @@ class AdminPanelViewSet(GenericViewSet):
                                 context={'request': request}
                             ).data
                         
-                        # Fallback to a basic search if we got no results
-                        if not results['users']:
-                            logger.info(f"No users found with advanced search, trying simple search for '{query}'")
-                            simple_user_results = simple_search(query, User, ['username', 'first_name', 'last_name', 'email', 'bio'], 40)
-                            results['users'] = AdminUserSerializer(
-                                simple_user_results,
-                                many=True,
-                                context={'request': request}
-                            ).data
-                    
-                    logger.info(f"Found {len(results['users'])} users")
-                except Exception as e:
-                    logger.error(f"Error searching users: {str(e)}", exc_info=True)
+                        logger.info(f"Found {len(results['users'])} users")
+                    except Exception as e:
+                        logger.error(f"Error searching users: {str(e)}", exc_info=True)
 
-            # Get posts if requested
-            if search_type in ['all', 'posts']:
-                try:
-                    if use_simple_search:
-                        # Use simple search directly
-                        simple_post_results = simple_search(query, Post, ['title', 'description', 'content'], 40)
-                        results['posts'] = AdminPostSerializer(
-                            simple_post_results,
-                            many=True,
-                            context={'request': request}
-                        ).data
-                    else:
-                        # First try the advanced search from SearchViewSet
+                # Get posts if requested - using exact same pattern as user search
+                if search_type in ['all', 'posts']:
+                    try:
                         posts_results = search_viewset._search_posts(query)
-                        # Convert to admin serializer format
-                        post_ids = [post['id'] for post in posts_results]
                         
-                        if post_ids:
+                        if posts_results:
+                            # Convert results to admin serializer format
+                            post_ids = [post['id'] for post in posts_results]
                             posts = Post.objects.filter(id__in=post_ids)
                             results['posts'] = AdminPostSerializer(
                                 posts,
@@ -1412,19 +1412,27 @@ class AdminPanelViewSet(GenericViewSet):
                                 context={'request': request}
                             ).data
                         
-                        # Fallback to a basic search if we got no results
-                        if not results['posts']:
-                            logger.info(f"No posts found with advanced search, trying simple search for '{query}'")
-                            simple_post_results = simple_search(query, Post, ['title', 'description', 'content'], 40)
+                        logger.info(f"Found {len(results['posts'])} posts")
+                    except Exception as e:
+                        logger.error(f"Error searching posts: {str(e)}", exc_info=True)
+                        # Provide fallback results for posts
+                        try:
+                            trending_posts = Post.objects.order_by('-created_at')[:5]
                             results['posts'] = AdminPostSerializer(
-                                simple_post_results,
+                                trending_posts,
                                 many=True,
                                 context={'request': request}
                             ).data
-                    
-                    logger.info(f"Found {len(results['posts'])} posts")
-                except Exception as e:
-                    logger.error(f"Error searching posts: {str(e)}", exc_info=True)
+                            logger.info(f"Using {len(results['posts'])} trending posts as fallback after search error")
+                        except Exception as fallback_error:
+                            logger.error(f"Error getting fallback posts: {str(fallback_error)}")
+            except ImportError as e:
+                logger.error(f"ImportError in admin search: {str(e)}", exc_info=True)
+                return Response({
+                    'success': False,
+                    'message': "Search functionality unavailable",
+                    'data': results
+                }, status=500)
 
             return Response({
                 'success': True,
@@ -1569,7 +1577,7 @@ class AdminPanelViewSet(GenericViewSet):
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
-class StaffManagementViewSet(viewsets.ModelViewSet):
+class StaffManagementViewSet(UsePrimaryDatabaseMixin, viewsets.ModelViewSet):
     permission_classes = [APIKeyPermission]
     serializer_class = AdminUserSerializer
 
@@ -1791,7 +1799,7 @@ def process_bulk_upload(self, task_id, csv_data):
             logger.info(f"Retrying task {task_id}, attempt {self.request.retries + 1}")
             raise self.retry(exc=e, countdown=60 * (2 ** self.request.retries))
 
-class BulkUploadViewSet(viewsets.ViewSet):
+class BulkUploadViewSet(UsePrimaryDatabaseMixin, viewsets.ViewSet):
     """ViewSet for handling bulk user uploads"""
     permission_classes = [APIKeyPermission]
     

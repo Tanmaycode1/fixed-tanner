@@ -26,8 +26,9 @@ from users.serializers import UserSerializer
 from core.decorators import handle_exceptions, cache_response
 from core.utils import handle_uploaded_file
 from core.views import BaseViewSet
+from core.db.decorators import use_primary_database, UsePrimaryDatabaseMixin
 
-class PostViewSet(BaseViewSet):
+class PostViewSet(UsePrimaryDatabaseMixin, BaseViewSet):
     queryset = Post.objects.all()
     serializer_class = PostSerializer
     parser_classes = (MultiPartParser, FormParser, JSONParser)
@@ -968,6 +969,7 @@ class PostViewSet(BaseViewSet):
 
     @action(detail=False, methods=['GET'])
     @method_decorator(cache_page(300))  # Cache for 5 minutes
+    @use_primary_database
     def highlights(self, request):
         """Get highlights: latest news, trending audio, and a random post"""
         try:
@@ -1148,7 +1150,7 @@ class PostViewSet(BaseViewSet):
                 'error': str(e)
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-class CommentViewSet(BaseViewSet):
+class CommentViewSet(UsePrimaryDatabaseMixin, BaseViewSet):
     queryset = Comment.objects.select_related('author', 'post').order_by('-created_at')
     serializer_class = CommentSerializer
     permission_classes = [IsAuthenticated]
@@ -1309,7 +1311,7 @@ class CommentViewSet(BaseViewSet):
             'data': serializer.data
         })
 
-class PostInteractionViewSet(BaseViewSet):
+class PostInteractionViewSet(UsePrimaryDatabaseMixin, BaseViewSet):
     queryset = PostInteraction.objects.select_related('user', 'post')
     serializer_class = PostInteractionSerializer
     permission_classes = [IsAuthenticated]

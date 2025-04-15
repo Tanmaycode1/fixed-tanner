@@ -17,6 +17,7 @@ export function RouteGuard({ children }: { children: React.ReactNode }) {
       '/auth/register',   // Registration page
       '/about',           // If you have an about page
       '/contact',         // If you have a contact page
+      '/premium',         // Premium features page
       '/privacy-policy',  // Other public pages
       '/terms'
     ];

@@ -1,9 +1,10 @@
 "use client";
 
 import { motion } from 'framer-motion';
-import { Check, Headphones, Mic, Users, MessageSquare, Clock, Upload } from 'lucide-react';
+import { Check, Headphones, Mic, Users, MessageSquare, Clock, Upload, ChevronDown, XCircle } from 'lucide-react';
 import Link from 'next/link';
 import Image from 'next/image';
+import { useState } from 'react';
 
 // Animation variants for consistent timing
 const fadeInUp = {
@@ -62,17 +63,31 @@ const features = [
   },
   {
     name: 'Pro',
-    price: '$9.99',
+    price: '$189.99',
     period: '/month',
     description: 'For content creators and professionals',
     features: [
       'Unlimited audio uploads',
-      'Extended storage space',
       'High quality audio',
       'Advanced analytics',
+      'Unlimited messenger credit',
+      'Access to analytic dashboard',
+      'Profile views for 365 days',
+      'Advanced follower and account search'
+    ],
+    extraFeatures: [
+      'Extended storage space',
       'Priority support',
       'Custom branding',
-      'Scheduled posts'
+      'Scheduled posts',
+      'Unlimited expert and investor browsing',
+      'Follower recommendation and save follower',
+      'AI search filters',
+      'Follower recommendation daily',
+      'Advanced content scheduling',
+      'Priority customer support',
+      'Custom API integrations',
+      'Exclusive webinars and events'
     ],
     cta: 'Upgrade to Pro',
     href: '/auth/register?plan=pro',
@@ -91,14 +106,68 @@ const features = [
       'Custom solutions',
       'White-label options'
     ],
+    extraFeatures: [
+      'Unlimited messenger credit',
+      'Access to analytic dashboard',
+      'Profile views for 365 days',
+      'Unlimited expert and investor browsing',
+      'Advanced follower and account search',
+      'Follower recommendation and save follower',
+      'AI search filters',
+      'Follower recommendation daily',
+      'Enterprise-grade security',
+      'User role management',
+      'Dedicated account manager',
+      'Custom reporting',
+      'Priority feature requests'
+    ],
     cta: 'Contact Sales',
     href: '/contact'
   }
 ];
 
 export default function PremiumPage() {
+  const [showModal, setShowModal] = useState(false);
+  const [modalFeatures, setModalFeatures] = useState<string[]>([]);
+  const [modalTitle, setModalTitle] = useState('');
+
+  const openFeaturesModal = (planName: string, features: string[]) => {
+    setModalTitle(`${planName} Plan - All Features`);
+    setModalFeatures(features);
+    setShowModal(true);
+  };
+
   return (
     <div className="bg-gradient-to-b from-gray-50 to-white dark:from-gray-900 dark:to-gray-800">
+      {/* Features Modal */}
+      {showModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-white dark:bg-gray-800 rounded-lg p-6 w-full max-w-md max-h-[80vh] overflow-y-auto"
+          >
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-xl font-bold text-gray-900 dark:text-white">{modalTitle}</h3>
+              <button 
+                onClick={() => setShowModal(false)}
+                className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+              >
+                <XCircle className="h-6 w-6" />
+              </button>
+            </div>
+            <ul className="space-y-3">
+              {modalFeatures.map((feature, index) => (
+                <li key={index} className="flex items-center">
+                  <Check className="h-5 w-5 text-primary-500 mr-3 flex-shrink-0" />
+                  <span className="text-gray-700 dark:text-gray-300">{feature}</span>
+                </li>
+              ))}
+            </ul>
+          </motion.div>
+        </div>
+      )}
+
       {/* Hero Section */}
       <section className="relative pt-32 pb-16 px-4 overflow-hidden">
         {/* Background Pattern */}
@@ -281,12 +350,24 @@ export default function PremiumPage() {
                 <ul className="space-y-4 mb-8">
                   {plan.features.map((feature) => (
                     <li key={feature} className="flex items-center">
-                      <Check className="h-5 w-5 text-primary-500 mr-3" />
+                      <Check className="h-5 w-5 text-primary-500 mr-3 flex-shrink-0" />
                       <span className="text-gray-600 dark:text-gray-300">
                         {feature}
                       </span>
                     </li>
                   ))}
+
+                  {plan.extraFeatures && plan.extraFeatures.length > 0 && (
+                    <li>
+                      <button 
+                        onClick={() => openFeaturesModal(plan.name, [...plan.features, ...plan.extraFeatures])}
+                        className="flex items-center text-primary-500 hover:text-primary-600 font-medium mt-2"
+                      >
+                        <ChevronDown className="h-4 w-4 mr-1" />
+                        See more features
+                      </button>
+                    </li>
+                  )}
                 </ul>
 
                 <Link

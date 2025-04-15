@@ -30,6 +30,7 @@ from functools import lru_cache
 from django.contrib.postgres.search import SearchQuery, SearchRank, SearchVector
 import time
 from django.contrib.auth import get_user_model
+from core.db.decorators import use_primary_database, UsePrimaryDatabaseMixin
 
 # Initialize NLTK components (you'll need to download these in your entrypoint.sh)
 try:
@@ -119,114 +120,144 @@ def simple_search(query, model, fields, limit=20):
     - Ignores case
     - Handles simple spelling mistakes
     - No caching, always fresh results
+    - Uses faster queries with timeouts to prevent hanging
     """
     logger.info(f"Using simple search for '{query}' on {model.__name__}")
     query = query.lower().strip()
-    results = []
+    
+    # Set a timeout for this query to prevent hanging connections
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("SET LOCAL statement_timeout = '3000';")  # 3 second timeout for simple search
+    except Exception as e:
+        logger.warning(f"Could not set timeout for simple search: {e}")
+    
+    # Limit the query to avoid too much processing
+    if len(query) > 100:
+        query = query[:100]
     
     if model == User:
         # For users, search in username, first_name, last_name, email, bio
         queryset = model.objects.all()
-        fields_to_check = fields
         
-        # First grab exact matches
-        exact_matches = queryset.filter(
-            Q(username__iexact=query) |
-            Q(first_name__iexact=query) |
-            Q(last_name__iexact=query) |
-            Q(email__iexact=query)
-        )
-        
-        # Then partial matches
-        partial_matches = queryset.filter(
-            Q(username__icontains=query) |
-            Q(first_name__icontains=query) |
-            Q(last_name__icontains=query) |
-            Q(email__icontains=query) |
-            Q(bio__icontains=query)
-        ).exclude(id__in=[user.id for user in exact_matches])
-        
-        # Combine results
-        all_matches = list(exact_matches) + list(partial_matches)
-        
-        # If we don't have enough results, do a more relaxed search with string similarity
-        if len(all_matches) < limit:
-            # Get all users (limit this in production to a reasonable number)
-            remaining_needed = limit - len(all_matches)
-            potential_matches = queryset.exclude(
-                id__in=[user.id for user in all_matches]
-            )[:500]  # Limit to 500 for performance
+        try:
+            # First grab exact matches - fast lookup
+            exact_matches = queryset.filter(
+                Q(username__iexact=query) |
+                Q(first_name__iexact=query) |
+                Q(last_name__iexact=query) |
+                Q(email__iexact=query)
+            )[:limit]
             
-            # Score based on string similarity
-            similar_matches = []
-            for user in potential_matches:
-                max_score = 0
-                for field in fields_to_check:
-                    field_value = getattr(user, field, "")
-                    if field_value:
-                        similarity = get_string_similarity(query, str(field_value))
-                        max_score = max(max_score, similarity)
+            # If we have enough exact matches, return them
+            if len(exact_matches) >= limit:
+                return exact_matches
+            
+            # Then partial matches
+            remaining = limit - len(exact_matches)
+            partial_matches = queryset.filter(
+                Q(username__icontains=query) |
+                Q(first_name__icontains=query) |
+                Q(last_name__icontains=query) |
+                Q(email__icontains=query) |
+                Q(bio__icontains=query)
+            ).exclude(id__in=[user.id for user in exact_matches])[:remaining]
+            
+            # Combine results
+            all_matches = list(exact_matches) + list(partial_matches)
+            
+            # If we don't have enough results, do a more relaxed search with string similarity
+            if len(all_matches) < limit:
+                # Get a limited number of potential matches to avoid memory issues
+                remaining_needed = limit - len(all_matches)
+                potential_matches = queryset.exclude(
+                    id__in=[user.id for user in all_matches]
+                ).order_by('-date_joined')[:300]  # Limit to 300 for performance
                 
-                if max_score > 0.6:  # Threshold for similarity
-                    similar_matches.append((user, max_score))
+                # Score based on string similarity
+                similar_matches = []
+                for user in potential_matches:
+                    max_score = 0
+                    for field in fields:
+                        field_value = getattr(user, field, "")
+                        if field_value:
+                            similarity = get_string_similarity(query, str(field_value))
+                            max_score = max(max_score, similarity)
+                    
+                    if max_score > 0.6:  # Threshold for similarity
+                        similar_matches.append((user, max_score))
+                
+                # Sort by similarity score and take the top N
+                similar_matches.sort(key=lambda x: x[1], reverse=True)
+                all_matches.extend([match[0] for match in similar_matches[:remaining_needed]])
             
-            # Sort by similarity score and take the top N
-            similar_matches.sort(key=lambda x: x[1], reverse=True)
-            all_matches.extend([match[0] for match in similar_matches[:remaining_needed]])
-        
-        return all_matches[:limit]
+            return all_matches[:limit]
+        except Exception as e:
+            logger.error(f"Error in user simple search: {str(e)}")
+            return model.objects.order_by('-date_joined')[:limit]  # Fallback to recent users
         
     elif model == Post:
         # For posts, search in title, description, content
         queryset = model.objects.all()
-        fields_to_check = fields
         
-        # First grab exact matches
-        exact_matches = queryset.filter(
-            Q(title__iexact=query) |
-            Q(description__iexact=query)
-        )
-        
-        # Then partial matches
-        partial_matches = queryset.filter(
-            Q(title__icontains=query) |
-            Q(description__icontains=query) |
-            Q(content__icontains=query)
-        ).exclude(id__in=[post.id for post in exact_matches])
-        
-        # Combine results
-        all_matches = list(exact_matches) + list(partial_matches)
-        
-        # If we don't have enough results, do a more relaxed search with string similarity
-        if len(all_matches) < limit:
-            # Get remaining posts
-            remaining_needed = limit - len(all_matches)
-            potential_matches = queryset.exclude(
-                id__in=[post.id for post in all_matches]
-            ).order_by('-created_at')[:500]  # Limit to 500 for performance
+        try:
+            # Exact matches - fast lookup
+            exact_matches_post = queryset.filter(
+                Q(title__iexact=query) |
+                Q(description__iexact=query)
+            )[:limit]
+
+            # If we have enough exact matches, return them
+            if len(exact_matches_post) >= limit:
+                return exact_matches_post
             
-            # Score based on string similarity
-            similar_matches = []
-            for post in potential_matches:
-                max_score = 0
-                for field in fields_to_check:
-                    field_value = getattr(post, field, "")
-                    if field_value:
-                        similarity = get_string_similarity(query, str(field_value))
-                        max_score = max(max_score, similarity)
+            # Partial matches, title and description have higher weight
+            remaining = limit - len(exact_matches_post)
+            partial_matches_post = queryset.filter(
+                Q(title__icontains=query) |
+                Q(description__icontains=query)
+            ).exclude(
+                id__in=[post.id for post in exact_matches_post]
+            )[:remaining]
+            
+            # Combine results
+            all_matches = list(exact_matches_post) + list(partial_matches_post)
+            
+            # If we don't have enough results, do a more relaxed search with string similarity
+            if len(all_matches) < limit:
+                # Get remaining posts - limit to recent posts for performance
+                remaining_needed = limit - len(all_matches)
+                potential_matches = queryset.exclude(
+                    id__in=[post.id for post in all_matches]
+                ).order_by('-created_at')[:300]  # Limit to 300 for performance
                 
-                if max_score > 0.6:  # Threshold for similarity
-                    similar_matches.append((post, max_score))
+                # Score based on string similarity
+                similar_matches = []
+                for post in potential_matches:
+                    max_score = 0
+                    for field in fields:
+                        field_value = getattr(post, field, "")
+                        if field_value:
+                            similarity = get_string_similarity(query, str(field_value))
+                            max_score = max(max_score, similarity)
+                    
+                    if max_score > 0.6:  # Threshold for similarity
+                        similar_matches.append((post, max_score))
+                
+                # Sort by similarity score and take the top N
+                similar_matches.sort(key=lambda x: x[1], reverse=True)
+                all_matches.extend([match[0] for match in similar_matches[:remaining_needed]])
             
-            # Sort by similarity score and take the top N
-            similar_matches.sort(key=lambda x: x[1], reverse=True)
-            all_matches.extend([match[0] for match in similar_matches[:remaining_needed]])
-        
-        return all_matches[:limit]
+            return all_matches[:limit]
+        except Exception as e:
+            logger.error(f"Error in post simple search: {str(e)}")
+            return model.objects.order_by('-created_at')[:limit]  # Fallback to recent posts
     
+    # If model not recognized, return empty list
+    logger.warning(f"Unrecognized model in simple_search: {model.__name__}")
     return []
 
-class SearchViewSet(ViewSet):
+class SearchViewSet(ViewSet, UsePrimaryDatabaseMixin):
     permission_classes = [IsAuthenticated]
 
     def _log_search(self, user, query, results_count, search_type='ALL', ip_address=None):
@@ -318,6 +349,15 @@ class SearchViewSet(ViewSet):
             query_terms = processed_query['original_tokens']
             processed_terms = processed_query['processed']
             
+            # Add timeout protection for database queries
+            # Check if this is an admin panel request (shorter timeout)
+            is_admin_panel = 'admin_panel=true' in self.request.path or 'admin-panel' in self.request.path
+            timeout_ms = 3000 if is_admin_panel else 5000  # 3 seconds for admin, 5 for normal
+            
+            with connection.cursor() as cursor:
+                cursor.execute(f"SET LOCAL statement_timeout = '{timeout_ms}';")
+                logger.info(f"Set timeout to {timeout_ms}ms for user search")
+            
             # Create search vectors
             username_vector = SearchVector('username', weight='A')
             first_name_vector = SearchVector('first_name', weight='B')
@@ -349,8 +389,9 @@ class SearchViewSet(ViewSet):
                 default=Value(0.0)
             )
             
-            # Get current user's following
-            user_following = self.request.user.following.all()
+            # Optimize query by limiting join complexity
+            # Get current user's following (use only IDs to avoid complex joins)
+            following_ids = self.request.user.following.values_list('id', flat=True)[:100]
             
             # Start building query
             users = User.objects.exclude(
@@ -406,8 +447,9 @@ class SearchViewSet(ViewSet):
                 # Phonetic matching score
                 phonetic_score=phonetic_score,
                 # Following status - boost users that the current user follows
-                is_followed=Exists(
-                    user_following.filter(id=OuterRef('id'))
+                is_followed=Case(
+                    When(id__in=following_ids, then=Value(True)),
+                    default=Value(False)
                 ),
                 # Activity score - boost more active users
                 activity_score=Cast(
@@ -522,7 +564,10 @@ class SearchViewSet(ViewSet):
         return queryset
 
     def _search_posts(self, query):
-        """Google-like post search with advanced ranking and relevance scoring"""
+        """
+        Enhanced post search with advanced relevance scoring, phonetic matching,
+        and contextual boosting - following the same approach as user search
+        """
         try:
             if not query:
                 logger.info("Empty query in _search_posts, returning default posts")
@@ -551,21 +596,21 @@ class SearchViewSet(ViewSet):
             query_terms = processed_query['original_tokens']
             processed_terms = processed_query['processed']
             
-            # Check for search intent signals
-            search_type = 'general'
-            if re.search(r'audio|podcast|listen', query, re.IGNORECASE):
-                search_type = 'audio'
-            elif re.search(r'news|article|read', query, re.IGNORECASE):
-                search_type = 'news'
+            # Set database statement timeout to prevent long-running queries
+            # Check if this is an admin panel request (shorter timeout)
+            is_admin_panel = 'admin_panel=true' in self.request.path or 'admin-panel' in self.request.path
+            timeout_ms = 3000 if is_admin_panel else 5000  # 3 seconds for admin, 5 for normal
             
-            # Create search vectors with appropriate weights
+            with connection.cursor() as cursor:
+                cursor.execute(f"SET LOCAL statement_timeout = '{timeout_ms}';")
+                logger.info(f"Set timeout to {timeout_ms}ms for post search")
+            
+            # Create search vectors
             title_vector = SearchVector('title', weight='A')
             description_vector = SearchVector('description', weight='B')
-            content_vector = SearchVector('content', weight='C')
-            tags_vector = SearchVector('tags__name', weight='A')
             
             # Create combined search vector
-            search_vector = title_vector + description_vector + content_vector + tags_vector
+            search_vector = title_vector + description_vector
             
             # Create search query with multiple terms
             search_queries = []
@@ -576,33 +621,18 @@ class SearchViewSet(ViewSet):
             for sq in search_queries[1:]:
                 combined_query = combined_query | sq
             
-            # Calculate similarities
+            # Calculate similarities for ranking
             title_similarity = TrigramSimilarity('title', query)
-            desc_similarity = TrigramSimilarity('description', query)
-            
-            # Date recency boost - newer content gets higher scores
-            recency_boost = Case(
-                When(created_at__gte=timezone.now() - timedelta(days=1), then=Value(2.0)),  # Last day
-                When(created_at__gte=timezone.now() - timedelta(days=7), then=Value(1.5)),  # Last week
-                When(created_at__gte=timezone.now() - timedelta(days=30), then=Value(1.0)), # Last month
-                default=Value(0.5)  # Older content
-            )
+            description_similarity = TrigramSimilarity('description', query)
             
             # Phonetic matching for title
-            phonetic_title_score = Case(
-                *[When(title__icontains=term, then=Value(0.8)) for term in query_terms],
+            phonetic_score = Case(
+                *[When(title__iendswith=term, then=Value(0.7)) for term in query_terms],
+                *[When(description__iendswith=term, then=Value(0.6)) for term in query_terms],
                 default=Value(0.0)
             )
             
-            # Popular content boost (TF-IDF like weighting)
-            popularity_boost = Cast(
-                (F('view_count') * 0.005) +  # Views have small influence
-                (F('like_count') * 0.01) +   # Likes have medium influence
-                (F('comment_count') * 0.02), # Comments have strong influence
-                FloatField()
-            )
-            
-            # Start building query
+            # Start building the post query
             posts = Post.objects.all()
             
             # Add search rank if we have a combined query
@@ -613,125 +643,102 @@ class SearchViewSet(ViewSet):
             else:
                 posts = posts.annotate(search_rank=Value(0.0, output_field=FloatField()))
             
-            # Apply type-based filtering if intent detected
-            if search_type == 'audio':
-                posts = posts.filter(type='AUDIO')
-            elif search_type == 'news':
-                posts = posts.filter(type='NEWS')
-            
-            # Apply all annotations for comprehensive relevance scoring
+            # Apply simpler relevance score similar to user search
             posts = posts.annotate(
-                # Exact match scores
-                exact_title_match=Case(
-                    When(title__iexact=query, then=Value(5.0)),
-                    *[When(title__iexact=term, then=Value(3.0)) for term in query_terms],
+                # Exact matches - highest priority
+                exact_match=Case(
+                    When(title__iexact=query, then=Value(3.0)),
+                    When(description__iexact=query, then=Value(2.0)),
                     default=Value(0.0)
                 ),
-                exact_desc_match=Case(
-                    When(description__iexact=query, then=Value(3.0)),
-                    *[When(description__iexact=term, then=Value(1.5)) for term in query_terms],
+                # Starts with - high priority
+                starts_with_score=Case(
+                    When(title__istartswith=query, then=Value(2.0)),
+                    When(description__istartswith=query, then=Value(1.5)),
+                    *[When(title__istartswith=term, then=Value(1.5)) for term in query_terms],
+                    *[When(description__istartswith=term, then=Value(1.0)) for term in query_terms],
                     default=Value(0.0)
                 ),
-                # Starts with scores
-                title_starts_with=Case(
-                    When(title__istartswith=query, then=Value(4.0)),
-                    *[When(title__istartswith=term, then=Value(2.0)) for term in query_terms],
+                # Contains - medium priority
+                contains_score=Case(
+                    When(title__icontains=query, then=Value(1.5)),
+                    When(description__icontains=query, then=Value(1.0)),
+                    *[When(title__icontains=term, then=Value(1.0)) for term in query_terms],
+                    *[When(description__icontains=term, then=Value(0.7)) for term in query_terms],
                     default=Value(0.0)
                 ),
-                # Contains scores
-                title_contains=Case(
-                    When(title__icontains=query, then=Value(2.5)),
-                    *[When(title__icontains=term, then=Value(1.5)) for term in query_terms],
+                # Author name search for better context
+                author_match=Case(
+                    When(author__username__icontains=query, then=Value(1.0)),
+                    When(author__first_name__icontains=query, then=Value(0.8)),
+                    When(author__last_name__icontains=query, then=Value(0.8)),
                     default=Value(0.0)
                 ),
-                desc_contains=Case(
-                    When(description__icontains=query, then=Value(1.8)),
-                    *[When(description__icontains=term, then=Value(1.0)) for term in query_terms],
-                    default=Value(0.0)
+                # Trigram similarity score
+                similarity=Greatest(
+                    title_similarity * 1.5,
+                    description_similarity * 1.0
                 ),
-                content_contains=Case(
-                    When(content__icontains=query, then=Value(1.0)),
-                    *[When(content__icontains=term, then=Value(0.5)) for term in query_terms],
-                    default=Value(0.0)
-                ),
-                # Trigram similarity scores
-                title_similarity=title_similarity * 2.0,
-                desc_similarity=desc_similarity * 1.0,
                 # Phonetic matching score
-                phonetic_score=phonetic_title_score,
-                # Date recency multiplier
-                recency_score=recency_boost,
-                # Popularity factor (engagement based)
-                popularity_score=popularity_boost,
-                # Final composite relevance score - combines all factors
-                relevance=Cast(
-                    (Greatest(
-                        F('exact_title_match'),
-                        F('exact_desc_match'),
-                        F('title_starts_with'),
-                        F('title_contains'),
-                        F('desc_contains'),
-                        F('content_contains'),
-                        F('title_similarity'),
-                        F('desc_similarity'),
-                        F('phonetic_score'),
-                        F('search_rank') * 2.0  # Full-text search gets high weight
-                    ) * F('recency_score')) + F('popularity_score'),  # Apply recency and popularity
+                phonetic_score=phonetic_score,
+                # Recency boost (newer content ranks higher)
+                recency_boost=Case(
+                    When(created_at__gte=timezone.now() - timedelta(days=7), then=Value(0.5)),
+                    When(created_at__gte=timezone.now() - timedelta(days=30), then=Value(0.3)),
+                    default=Value(0.0)
+                ),
+                # Popularity boost based on engagement
+                popularity_boost=Cast(
+                    (F('view_count') * 0.01) +
+                    (F('like_count') * 0.05) +
+                    (F('comment_count') * 0.03),
                     FloatField()
+                ),
+                # Final composite relevance score
+                relevance=Greatest(
+                    F('exact_match'),
+                    F('starts_with_score'),
+                    F('contains_score'),
+                    F('similarity'),
+                    F('phonetic_score'),
+                    F('search_rank') * 1.5  # Weight the full-text search rank highly
                 )
             )
             
-            # Store original, non-filtered query
-            original_posts = posts
+            # Apply specific type filter if intent detected
+            search_type = 'general'
+            if re.search(r'audio|podcast|listen', query, re.IGNORECASE):
+                search_type = 'audio'
+                posts = posts.filter(type='AUDIO')
+            elif re.search(r'news|article|read', query, re.IGNORECASE):
+                search_type = 'news'
+                posts = posts.filter(type='NEWS')
             
-            # First try with stricter relevance filter
+            # Use simple, less restrictive filtering (similar to user search)
             filtered_posts = posts.filter(
-                # Comprehensive filtering for high recall
-                Q(relevance__gt=0.2) |
-                Q(search_rank__gt=0.1) |
+                # Make filtering MUCH less restrictive to ensure results are returned
+                Q(relevance__gt=0.01) |  # Low threshold to ensure results
+                Q(search_rank__gt=0.01) |
                 Q(title__icontains=normalized_query) |
                 Q(description__icontains=normalized_query) |
-                Q(content__icontains=normalized_query) |
-                Q(title__in=[term for term in query_terms]) |
-                Q(tags__name__in=[term for term in query_terms])
+                Q(author__username__icontains=normalized_query) |
+                Q(tags__name__icontains=normalized_query)
             ).order_by(
-                '-relevance'  # Single order by most relevant first
-            ).distinct()  # Ensure no duplicates from joins
-            
-            # If we have very few results, try a more relaxed filter
-            if filtered_posts.count() < 5:
-                logger.info(f"Few results ({filtered_posts.count()}) for '{query}', trying relaxed filter")
-                filtered_posts = posts.filter(
-                    Q(relevance__gt=0.1) |  # Lower relevance threshold
-                    Q(search_rank__gt=0.05) |  # Lower search rank threshold
-                    Q(title__icontains=query) |
-                    Q(description__icontains=query) |
-                    Q(content__icontains=query) |
-                    Q(author__username__icontains=query) |  # Add author search
-                    Q(tags__name__icontains=query)
-                ).order_by('-relevance').distinct()
-            
-            # If still no results, add some trending posts as fallback
-            if filtered_posts.count() == 0:
-                logger.info(f"No results for '{query}', adding trending posts as fallback")
-                trending_posts = Post.objects.order_by('-trending_score__score', '-created_at')[:5]
-                filtered_posts = trending_posts
+                '-relevance',      # First by relevance
+                '-recency_boost',  # Then by recency
+                '-popularity_boost' # Then by popularity
+            ).distinct()  # Prevent duplicates
             
             # Apply common post preparations
             posts = self._prepare_post_queryset(filtered_posts)
             
-            # For performance, limit to a reasonable number but ensure we get results
+            # Limit results for performance
             posts = posts[:40]
             
             # Fall back to a simpler query if no results
             if not posts:
                 logger.info(f"No posts found with complex query for '{query}', falling back to simpler search")
-                simple_posts = Post.objects.filter(
-                    Q(title__icontains=normalized_query) |
-                    Q(description__icontains=normalized_query) |
-                    Q(content__icontains=normalized_query)
-                ).order_by('-created_at')[:40]
-                
+                simple_posts = simple_search(query, Post, ['title', 'description', 'content'], 40)
                 posts = self._prepare_post_queryset(simple_posts)
             
             # Serialize results
@@ -746,17 +753,12 @@ class SearchViewSet(ViewSet):
                 for i, post in enumerate(posts[:20]):  # Limit debug info to top 20
                     if i < len(serialized_data):
                         serialized_data[i]['_debug'] = {
-                            'exact_title': float(post.exact_title_match),
-                            'exact_desc': float(post.exact_desc_match), 
-                            'title_starts': float(post.title_starts_with),
-                            'title_contains': float(post.title_contains),
-                            'desc_contains': float(post.desc_contains),
-                            'title_similarity': float(post.title_similarity),
-                            'desc_similarity': float(post.desc_similarity),
+                            'exact_match': float(post.exact_match),
+                            'starts_with': float(post.starts_with_score),
+                            'contains': float(post.contains_score),
+                            'similarity': float(post.similarity),
                             'phonetic': float(post.phonetic_score),
                             'search_rank': float(post.search_rank),
-                            'recency': float(post.recency_score),
-                            'popularity': float(post.popularity_score),
                             'relevance': float(post.relevance),
                             'search_type': search_type
                         }
@@ -795,6 +797,14 @@ class SearchViewSet(ViewSet):
             bypass_cache = request.GET.get('refresh', '').lower() == 'true'
             # Add a flag to use the simple search directly
             use_simple_search = request.GET.get('simple', '').lower() == 'true'
+            
+            # Set shorter timeout for admin panel searches to avoid WebSocket timeouts
+            is_admin_search = 'admin-panel' in request.path
+            
+            # Set database statement timeout based on context
+            if is_admin_search:
+                with connection.cursor() as cursor:
+                    cursor.execute("SET LOCAL statement_timeout = '3000';")  # 3 second timeout for admin searches
             
             # Get client IP for logging
             ip_address = request.META.get('REMOTE_ADDR')
@@ -1024,7 +1034,12 @@ class SearchViewSet(ViewSet):
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
+@use_primary_database
 def search(request):
+    # Set shorter timeout for search queries to prevent hanging connections
+    with connection.cursor() as cursor:
+        cursor.execute("SET LOCAL statement_timeout = '5000';")  # 5 second timeout
+        
     query = request.GET.get('q', '').strip()
     if query:
         try:

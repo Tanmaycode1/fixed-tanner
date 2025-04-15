@@ -40,6 +40,7 @@ INSTALLED_APPS = [
     'social_django',
     
     # Local apps
+    'core.apps.CoreConfig',
     'users.apps.UsersConfig',
     'authentication.apps.AuthenticationConfig',
     'posts.apps.PostsConfig',
@@ -251,6 +252,24 @@ CORS_PREFLIGHT_MAX_AGE = 86400  # 24 hours
 # Add websocket to allowed hosts
 ALLOWED_HOSTS = ['*']  # For development only 
 
-# WebSocket specific settings
-WEBSOCKET_TIMEOUT = 30  # 30 seconds timeout
-WEBSOCKET_ACCEPT_WAIT = 20  # 20 seconds wait for accept 
+# WebSocket Timeout Settings
+WEBSOCKET_TIMEOUT = 30  # 30 seconds timeout for overall WebSocket connections
+WEBSOCKET_ACCEPT_WAIT = 20  # 20 seconds wait for accept
+WEBSOCKET_DATABASE_TIMEOUT = 3000  # 3 seconds for database operations in WebSocket context
+
+# Database Timeout Settings
+DATABASE_STATEMENT_TIMEOUT = int(os.getenv('DATABASE_STATEMENT_TIMEOUT', 10000))  # 10 seconds default
+DATABASE_LOCKS_TIMEOUT = int(os.getenv('DATABASE_LOCKS_TIMEOUT', 10000))  # 10 seconds default
+
+# Special flag to force using primary database for all operations
+# This is useful for debugging read-only errors
+REPLICA_FORCE_PRIMARY_DATABASE = False
+
+# Automatically apply shorter timeouts for WebSocket-related operations
+WEBSOCKET_DATABASE_TIMEOUT = 3000  # 3 seconds for WebSocket operations
+
+# To ensure proper timeouts are set on application startup,
+# add the following code to your AppConfig's ready() method:
+#
+# from core.db.routers import set_database_timeouts
+# set_database_timeouts() 

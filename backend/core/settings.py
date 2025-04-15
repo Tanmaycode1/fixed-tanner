@@ -72,6 +72,8 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    'core.middleware.ThreadLocalRequestMiddleware',
+    'core.middleware.ReadOnlyDbErrorMiddleware',
 ]
 
 ROOT_URLCONF = 'core.urls'
@@ -108,6 +110,16 @@ DATABASES = {
     }
 }
 
+# Configure the database router to handle read/write operations properly
+DATABASE_ROUTERS = ['core.db.routers.PrimaryReplicaRouter']
+
+# Database routing settings
+DB_SENSITIVE_MODELS_USE_PRIMARY = True  # Forces sensitive models to always use primary database
+CELERY_TASK_DB_PRIMARY = True  # Forces Celery tasks to use primary database for all operations
+
+# Force use of primary database for specific views or operations
+# (keep this commented unless specifically needed)
+# REPLICA_FORCE_PRIMARY_DATABASE = True
 
 # Password validation
 # https://docs.djangoproject.com/en/5.1/ref/settings/#auth-password-validators
